@@ -1,0 +1,6 @@
+Li Wei
+PhD Candidate in Computational Biology
+Research interests: single-cell transcriptomics, network biology, machine learning for genomics
+Methods: differential expression, graph-based modeling, pathway enrichment, literature synthesis
+Tools: Python, R, Scanpy, PyTorch, Seurat, Git, LaTeX
+Typical work: paper outlining, literature review, experiment planning, group meeting presentations

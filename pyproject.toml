@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clawlab"
+version = "0.1.0"
+description = "Python-first CLI MVP for researcher profile, project, task, and learning loops."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.11,<3.0",
+  "typer>=0.15,<1.0"
+]
+
+[project.scripts]
+clawlab = "clawlab.cli.main:app"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["clawlab*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
