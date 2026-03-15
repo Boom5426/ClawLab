@@ -1,6 +1,6 @@
 # ClawLab
 
-ClawLab 是一个面向研究生和博士生的 Python-first CLI 研究协作系统。
+ClawLab 是一个面向研究人员的 Python-first CLI 研究协作系统。
 
 它的目标不是做一个花哨网页，也不是做泛化的“科研 Agent demo”，而是把你的本地仓库逐步变成一个真正可持续演进的研究工作仓库：
 
