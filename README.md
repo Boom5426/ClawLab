@@ -1,9 +1,8 @@
 <div align="center">
   <img src="ClawLab.png" alt="ClawLab Logo" width="520" />
 
-  <h1>ClawLab</h1>
+  <h1>ClawLab: Build your virtual research company ! </h1>
 
-  <p><strong>Build your virtual research company.</strong></p>
 </div>
 
 ClawLab 是一个面向研究生、博士生和研究型创作者的 Python-first CLI 系统。  
