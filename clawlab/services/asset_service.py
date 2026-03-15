@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from datetime import datetime
 
 from clawlab.core.models import MaterialSummary, ProjectCard, ResearcherProfile, ReusableAsset
 
@@ -48,11 +49,53 @@ def _asset_relevance_score(
     score += len(profile_tokens & asset_tokens)
     score += len(material_tokens & asset_tokens) * 2
     score += 1 if asset.asset_type == "writing_rule" else 0
+    if asset.asset_type == "project_note" and asset.project_card_id == project.id:
+        score += 2
     return score
 
 
+def _parse_created_at(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min
+
+
 def select_top_assets(assets: list[ReusableAsset], *, limit: int = 5) -> list[ReusableAsset]:
-    return assets[:limit]
+    if not assets:
+        return []
+
+    selected: list[ReusableAsset] = []
+    seen_types: set[str] = set()
+    seen_scopes: set[str] = set()
+
+    for asset in assets:
+        if len(selected) >= limit:
+            break
+        if asset.scope == "project" and asset.scope not in seen_scopes:
+            selected.append(asset)
+            seen_scopes.add(asset.scope)
+            seen_types.add(asset.asset_type)
+
+    for asset in assets:
+        if len(selected) >= limit:
+            break
+        if asset.id in {item.id for item in selected}:
+            continue
+        if asset.asset_type not in seen_types:
+            selected.append(asset)
+            seen_scopes.add(asset.scope)
+            seen_types.add(asset.asset_type)
+
+    for asset in assets:
+        if len(selected) >= limit:
+            break
+        if asset.id not in {item.id for item in selected}:
+            selected.append(asset)
+            seen_scopes.add(asset.scope)
+            seen_types.add(asset.asset_type)
+
+    return selected[:limit]
 
 
 def retrieve_assets_for_task(
@@ -63,9 +106,9 @@ def retrieve_assets_for_task(
     material_summaries: list[MaterialSummary],
     assets: list[ReusableAsset],
 ) -> list[ReusableAsset]:
-    ranked = sorted(
-        assets,
-        key=lambda asset: (
+    scored_assets = [
+        (
+            asset,
             _asset_relevance_score(
                 asset,
                 task_type=task_type,
@@ -73,15 +116,26 @@ def retrieve_assets_for_task(
                 profile=profile,
                 material_summaries=material_summaries,
             ),
-            asset.created_at,
+        )
+        for asset in assets
+    ]
+    ranked = [
+        asset
+        for asset, _score in sorted(
+            scored_assets,
+            key=lambda item: (item[1], _parse_created_at(item[0].created_at)),
+            reverse=True,
+        )
+    ]
+    filtered = [asset for asset, score in scored_assets if score > 0]
+    filtered = sorted(filtered, key=lambda asset: (
+        _asset_relevance_score(
+            asset,
+            task_type=task_type,
+            project=project,
+            profile=profile,
+            material_summaries=material_summaries,
         ),
-        reverse=True,
-    )
-    filtered = [asset for asset in ranked if _asset_relevance_score(
-        asset,
-        task_type=task_type,
-        project=project,
-        profile=profile,
-        material_summaries=material_summaries,
-    ) > 0]
+        _parse_created_at(asset.created_at),
+    ), reverse=True)
     return select_top_assets(filtered or ranked, limit=5)

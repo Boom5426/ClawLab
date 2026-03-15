@@ -75,13 +75,17 @@ def create_task_plan(
     output_strategy, recommended_structure = _rule_based_strategy(task_type)
     merged_topics = []
     merged_entities = []
+    material_titles = []
     for summary in material_summaries:
+        material_titles.append(summary.title)
         merged_topics.extend(summary.key_topics[:3])
         merged_entities.extend(summary.methods_or_entities[:3])
     deduped_topics = list(dict.fromkeys(merged_topics))
     deduped_entities = list(dict.fromkeys(merged_entities))
+    asset_hints = [f"{asset.asset_type}: {asset.title}" for asset in retrieved_assets[:4]]
     key_points = [
         f"Cover the main project question: {project.research_question}",
+        f"Ground the draft in these materials: {', '.join(material_titles[:3]) or 'primary material only'}",
         f"Use the strongest material topics: {', '.join(deduped_topics[:5]) or 'none extracted'}",
         f"Track methods or entities: {', '.join(deduped_entities[:5]) or 'none extracted'}",
     ]
@@ -90,7 +94,8 @@ def create_task_plan(
         f"Address the blocker directly: {'; '.join(project.blockers) or 'no blocker listed'}",
         "Prefer learned assets when they reduce generic framing.",
     ]
-    selected_asset_labels = [f"{asset.asset_type}: {asset.title}" for asset in retrieved_assets[:4]]
+    if asset_hints:
+        considerations.append(f"Reuse prior assets selectively: {'; '.join(asset_hints[:3])}")
     return TaskPlan(
         task_type=task_type,  # type: ignore[arg-type]
         task_goal=(
@@ -101,5 +106,5 @@ def create_task_plan(
         key_points_to_cover=key_points,
         recommended_structure=recommended_structure,
         project_considerations=considerations,
-        selected_assets=selected_asset_labels,
+        selected_assets=asset_hints,
     )

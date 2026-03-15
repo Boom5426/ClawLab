@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from clawlab.core.models import LlmSettings, MaterialSummary, ProjectCard, ReusableAsset, TaskCard, TaskPlan
-from clawlab.services.asset_service import group_assets_by_scope, retrieve_assets_for_task
+from clawlab.services.asset_service import group_assets_by_scope, retrieve_assets_for_task, select_top_assets
 from clawlab.services.draft_service import generate_draft
 from clawlab.services.ingest_service import read_cv_text
 from clawlab.services.learning_service import derive_assets_from_revision
@@ -69,6 +69,23 @@ Tools: Python, R, Git
         self.assertTrue(summary.useful_snippets)
         self.assertTrue(summary.raw_text_excerpt)
         self.assertTrue(summary.relevance_to_project)
+        self.assertIn("project", summary.short_summary.lower())
+
+    def test_condensed_summary_prefers_informative_excerpt(self) -> None:
+        project = ProjectCard(
+            id="project_demo",
+            researcher_profile_id="profile_demo",
+            title="Glioma resistance project",
+            research_question="How do resistant glioma states emerge?",
+            current_goal="Prepare a literature-backed outline",
+            current_stage="Evidence consolidation",
+            blockers=["Need tighter storyline"],
+            materials=["notes"],
+            next_step="Outline the evidence buckets",
+        )
+        summary = condense_material(Path("examples/task_input.txt"), project=project)
+        self.assertTrue(summary.raw_text_excerpt.strip())
+        self.assertTrue(any(topic in summary.short_summary.lower() for topic in summary.key_topics[:2]))
 
     def test_local_mode_does_not_require_api_key(self) -> None:
         enabled, reason = get_llm_runtime_status(LlmSettings(), "materials")
@@ -266,6 +283,43 @@ Tools: Python, R, Git
         self.assertIn("asset_project_note", retrieved_ids)
         self.assertNotEqual(retrieved_ids[0], "asset_unrelated")
 
+    def test_select_top_assets_preserves_scope_and_type_diversity(self) -> None:
+        assets = [
+            ReusableAsset(
+                id="a1",
+                scope="project",
+                asset_type="project_note",
+                title="Project note",
+                content="Current blocker is storyline.",
+                confidence=0.9,
+                source_task_id="task1",
+                project_card_id="project_x",
+                task_type="literature-outline",
+            ),
+            ReusableAsset(
+                id="a2",
+                scope="global",
+                asset_type="writing_rule",
+                title="Claim first",
+                content="Lead with the claim.",
+                confidence=0.8,
+                source_task_id="task2",
+            ),
+            ReusableAsset(
+                id="a3",
+                scope="task",
+                asset_type="structure_template",
+                title="Outline template",
+                content="Context, evidence, gap.",
+                confidence=0.75,
+                source_task_id="task3",
+            ),
+        ]
+        selected = select_top_assets(assets, limit=3)
+        self.assertEqual(selected[0].scope, "project")
+        self.assertIn("writing_rule", {asset.asset_type for asset in selected})
+        self.assertIn("structure_template", {asset.asset_type for asset in selected})
+
     def test_task_planning_differs_by_task_type(self) -> None:
         profile, project, material_summary = self._build_profile_project_material()
         literature_plan = create_task_plan(
@@ -286,6 +340,7 @@ Tools: Python, R, Git
         self.assertEqual(paper_plan.output_strategy, "paper_storyline")
         self.assertTrue(literature_plan.recommended_structure)
         self.assertTrue(paper_plan.recommended_structure)
+        self.assertTrue(any("materials" in point.lower() for point in literature_plan.key_points_to_cover))
 
 
 class LearningServiceTests(unittest.TestCase):

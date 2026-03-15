@@ -45,6 +45,24 @@ STOPWORDS = {
     "their",
     "they",
     "them",
+    "such",
+    "than",
+    "also",
+    "between",
+    "within",
+    "while",
+    "where",
+    "show",
+    "shows",
+    "suggest",
+    "suggests",
+    "paper",
+    "figure",
+    "table",
+    "section",
+    "introduction",
+    "discussion",
+    "conclusion",
 }
 METHOD_ENTITY_PATTERNS = [
     "single-cell",
@@ -84,6 +102,7 @@ def _clean_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     lines = [line.strip() for line in text.split("\n")]
     filtered: list[str] = []
+    line_counts = Counter(line for line in lines if line)
     for line in lines:
         if not line:
             filtered.append("")
@@ -92,8 +111,17 @@ def _clean_text(text: str) -> str:
             continue
         if len(line) <= 3 and line.lower() in {"cv", "resume"}:
             continue
+        if line_counts.get(line, 0) >= 3 and len(line) <= 80:
+            continue
+        if re.fullmatch(r"page \d+( of \d+)?", line.lower()):
+            continue
+        if re.fullmatch(r"references?", line.lower()):
+            filtered.append("")
+            continue
         filtered.append(line)
     cleaned = "\n".join(filtered)
+    cleaned = re.sub(r"(?<![.!?:])\n(?=[a-z])", " ", cleaned)
+    cleaned = re.sub(r"(?<![.!?:])\n(?=[(])", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
@@ -137,9 +165,27 @@ def read_material(path: Path) -> MaterialDocument:
 
 
 def _pick_title(lines: list[str], path: Path) -> str:
-    for line in lines[:12]:
-        if 6 <= len(line) <= 140 and not line.endswith(":"):
-            return line
+    best_line = ""
+    best_score = -1
+    for idx, line in enumerate(lines[:20]):
+        if not (6 <= len(line) <= 160) or line.endswith(":"):
+            continue
+        score = 0
+        if idx <= 2:
+            score += 4
+        if len(line.split()) <= 16:
+            score += 2
+        if not line.endswith("."):
+            score += 1
+        if sum(char.isupper() for char in line) >= 2:
+            score += 1
+        if any(token in line.lower() for token in ("study", "analysis", "project", "mechanism", "resistance", "outline")):
+            score += 2
+        if score > best_score:
+            best_line = line
+            best_score = score
+    if best_line:
+        return best_line
     return path.stem.replace("_", " ").replace("-", " ").strip() or "Untitled material"
 
 
@@ -184,6 +230,10 @@ def _paragraphs(text: str) -> list[str]:
     return normalized
 
 
+def _paragraph_signature(paragraph: str) -> str:
+    return " ".join(re.findall(r"[A-Za-z][A-Za-z\-]{2,}", paragraph.lower())[:12])
+
+
 def _project_terms(project: ProjectCard | None) -> set[str]:
     if project is None:
         return set()
@@ -196,7 +246,11 @@ def _score_paragraph(paragraph: str, project_terms: set[str]) -> int:
     score = 0
     score += sum(2 for term in METHOD_ENTITY_PATTERNS if term in lower)
     score += sum(3 for term in project_terms if term in lower)
-    score += 1 if any(marker in lower for marker in ("result", "finding", "evidence", "method", "gap", "question")) else 0
+    score += 2 if any(marker in lower for marker in ("result", "finding", "evidence", "method", "gap", "question")) else 0
+    score += 2 if any(marker in lower for marker in ("we propose", "we show", "we find", "our results", "our data")) else 0
+    score += 1 if 70 <= len(paragraph) <= 420 else 0
+    score -= 2 if sum(char.isdigit() for char in paragraph) > 20 else 0
+    score -= 3 if paragraph.lower().startswith(("copyright", "all rights reserved")) else 0
     return score
 
 
@@ -204,13 +258,39 @@ def _pick_useful_snippets(paragraphs: list[str], project: ProjectCard | None, li
     project_terms = _project_terms(project)
     ranked = sorted(paragraphs, key=lambda paragraph: (_score_paragraph(paragraph, project_terms), len(paragraph)), reverse=True)
     snippets: list[str] = []
+    seen_signatures: set[str] = set()
     for paragraph in ranked:
+        if _score_paragraph(paragraph, project_terms) < 1:
+            continue
         candidate = paragraph[:280].strip()
-        if candidate not in snippets:
+        signature = _paragraph_signature(candidate)
+        if candidate not in snippets and signature not in seen_signatures:
             snippets.append(candidate)
+            seen_signatures.add(signature)
         if len(snippets) >= limit:
             break
     return snippets
+
+
+def _summary_sentences(
+    title: str,
+    key_topics: list[str],
+    methods_or_entities: list[str],
+    useful_snippets: list[str],
+    project: ProjectCard | None,
+) -> str:
+    summary_parts = []
+    if title:
+        summary_parts.append(f"Material focus: {title}.")
+    if key_topics:
+        summary_parts.append(f"Core topics: {', '.join(key_topics[:4])}.")
+    if methods_or_entities:
+        summary_parts.append(f"Methods or entities worth tracking: {', '.join(methods_or_entities[:4])}.")
+    if useful_snippets:
+        summary_parts.append(f"Most informative point: {useful_snippets[0]}")
+    if project is not None:
+        summary_parts.append(f"Project fit: {project.current_goal}.")
+    return " ".join(summary_parts)[:480]
 
 
 def _relevance_to_project(summary_title: str, text: str, project: ProjectCard | None) -> str:
@@ -223,6 +303,11 @@ def _relevance_to_project(summary_title: str, text: str, project: ProjectCard | 
         return (
             f"This material overlaps with the active project through: {', '.join(sorted(overlap)[:6])}. "
             f"It is likely relevant to the current goal: {project.current_goal}"
+        )
+    if any(entity in text.lower() for entity in _extract_methods_or_entities(text, limit=8)):
+        return (
+            f"This material does not share many direct project keywords, but it contains methods or entities "
+            f"that could still support the active goal: {project.current_goal}"
         )
     return (
         f"This material does not strongly overlap by keyword with the active project, "
@@ -282,16 +367,13 @@ def condense_text_to_material_summary(
     methods_or_entities = _extract_methods_or_entities(cleaned)
     useful_snippets = _pick_useful_snippets(paragraphs or lines, project)
 
-    summary_parts = []
-    if title:
-        summary_parts.append(f"Material focus: {title}.")
-    if key_topics:
-        summary_parts.append(f"Key topics include {', '.join(key_topics[:4])}.")
-    if methods_or_entities:
-        summary_parts.append(f"Methods or entities mentioned: {', '.join(methods_or_entities[:4])}.")
-    if useful_snippets:
-        summary_parts.append(f"Most useful snippet: {useful_snippets[0]}")
-    short_summary = " ".join(summary_parts)[:420]
+    short_summary = _summary_sentences(
+        title=title,
+        key_topics=key_topics,
+        methods_or_entities=methods_or_entities,
+        useful_snippets=useful_snippets,
+        project=project,
+    )
 
     return MaterialSummary(
         id=create_id("material"),
@@ -303,7 +385,7 @@ def condense_text_to_material_summary(
         methods_or_entities=methods_or_entities,
         useful_snippets=useful_snippets[:6],
         relevance_to_project=_relevance_to_project(title, cleaned, project),
-        raw_text_excerpt=cleaned[:600],
+        raw_text_excerpt="\n\n".join((paragraphs[:2] or lines[:6]))[:700],
     )
 
 
