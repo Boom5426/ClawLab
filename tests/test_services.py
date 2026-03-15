@@ -5,6 +5,7 @@ from unittest.mock import patch
 from clawlab.core.models import LlmSettings, MaterialSummary, ProjectCard, ReusableAsset, TaskCard, TaskPlan
 from clawlab.services.asset_service import group_assets_by_scope, retrieve_assets_for_task, select_top_assets
 from clawlab.services.draft_service import generate_draft
+from clawlab.services.employee_service import get_employee_spec, list_employee_specs, run_employee_task
 from clawlab.services.ingest_service import read_cv_text
 from clawlab.services.learning_service import derive_assets_from_revision
 from clawlab.services.llm_service import get_llm_runtime_status
@@ -411,6 +412,8 @@ Tools: Python, LaTeX
         self.assertIn("global", {asset.scope for asset in assets})
         self.assertIn("project", {asset.scope for asset in assets})
         self.assertIn("task", {asset.scope for asset in assets})
+        self.assertIn("Signals:", updated_task.feedback_summary)
+        self.assertIn("Observed revision signals", assets[-1].content)
 
     @patch("clawlab.services.learning_service.is_llm_enabled", return_value=True)
     @patch("clawlab.services.learning_service.call_llm")
@@ -447,6 +450,55 @@ Tools: Python, LaTeX
             llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_learning=True),
         )
         self.assertEqual(assets[0].content, "Prefer explicit gap statements.")
+
+    def test_task_plan_carries_selected_assets(self) -> None:
+        profile = parse_cv_to_profile(
+            """Li Wei
+PhD Candidate in Computational Biology
+Tools: Python, LaTeX
+"""
+        )
+        project = create_project_from_answers(
+            profile,
+            title="Test project",
+            desired_outcome="Prepare an outline",
+            blocker="Scattered notes",
+            materials="Paper notes; memo",
+        )
+        material_summary = MaterialSummary(
+            id="material_test",
+            source_path="examples/task_input.txt",
+            source_type="txt",
+            title="Task input material",
+            short_summary="Evidence summary for resistant glioma states.",
+            key_topics=["glioma", "resistance"],
+            methods_or_entities=["single-cell"],
+            useful_snippets=["Trajectory evidence sharpens the storyline."],
+            relevance_to_project="Strongly relevant to the active goal.",
+            raw_text_excerpt="Trajectory evidence sharpens the storyline.",
+        )
+        assets = [
+            ReusableAsset(
+                id="asset_rule_demo",
+                scope="global",
+                asset_type="writing_rule",
+                title="Claim-first writing",
+                content="Open each section with a project-specific claim.",
+                confidence=0.8,
+                source_task_id="task_prev",
+                project_card_id=project.id,
+                task_type="paper-outline",
+            )
+        ]
+        plan = create_task_plan(
+            task_type="paper-outline",
+            profile=profile,
+            project=project,
+            material_summaries=[material_summary],
+            retrieved_assets=assets,
+        )
+        self.assertTrue(plan.selected_assets)
+        self.assertIn("Claim-first writing", plan.selected_assets[0])
 
     def test_assets_are_saved_as_json_and_markdown(self) -> None:
         profile = parse_cv_to_profile(
@@ -491,6 +543,79 @@ Tools: Python, LaTeX
         self.assertTrue(Path(f"workspace/assets/templates/{assets[-2].id}.md").exists())
         self.assertTrue(Path(f"workspace/assets/project-notes/{assets[-1].id}.md").exists())
         self.assertTrue(Path(f"workspace/projects/{project.id}/notes/{assets[-1].id}.md").exists())
+
+
+class EmployeeServiceTests(unittest.TestCase):
+    def test_employee_registry_contains_expected_roles(self) -> None:
+        roles = {spec.role_name for spec in list_employee_specs()}
+        self.assertEqual(
+            roles,
+            {"literature_analyst", "project_manager", "draft_writer", "review_editor"},
+        )
+        spec = get_employee_spec("draft_writer")
+        self.assertIn("markdown generation", spec.core_capabilities)
+
+    def test_literature_analyst_creates_real_deliverable(self) -> None:
+        profile = parse_cv_to_profile(
+            """Li Wei
+PhD Candidate in Computational Biology
+Tools: Python, LaTeX
+"""
+        )
+        project = create_project_from_answers(
+            profile,
+            title="Glioma resistance project",
+            desired_outcome="Prepare an outline",
+            blocker="Scattered notes",
+            materials="Paper notes; memo",
+        )
+        save_project(project)
+        deliverable = run_employee_task(
+            "literature_analyst",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+        )
+        self.assertEqual(deliverable.employee_role, "literature_analyst")
+        self.assertTrue(Path(deliverable.output_path).exists())
+
+    def test_draft_writer_creates_task_backed_deliverable(self) -> None:
+        profile = parse_cv_to_profile(
+            """Li Wei
+PhD Candidate in Computational Biology
+Methods: differential expression, literature synthesis
+Tools: Python, R, Git
+"""
+        )
+        project = create_project_from_answers(
+            profile,
+            title="Glioma resistance project",
+            desired_outcome="Prepare a tighter outline",
+            blocker="Scattered notes",
+            materials="Paper notes; memo",
+        )
+        save_project(project)
+        material_summary = MaterialSummary(
+            id="material_test",
+            source_path="examples/task_input.txt",
+            source_type="txt",
+            title="Task input material",
+            short_summary="This material summarizes resistance state transitions and points to the central evidence gap.",
+            key_topics=["resistance", "state", "transition"],
+            methods_or_entities=["single-cell", "trajectory"],
+            useful_snippets=["Trajectory evidence is more useful than static cluster labels for this project."],
+            relevance_to_project="Strongly relevant to the current project goal.",
+            raw_text_excerpt="Need a literature outline for treatment-resistant glioma state transitions.",
+        )
+        deliverable = run_employee_task(
+            "draft_writer",
+            profile=profile,
+            project=project,
+            task_type="literature-outline",
+            material_summaries=[material_summary],
+        )
+        self.assertEqual(deliverable.employee_role, "draft_writer")
+        self.assertIsNotNone(deliverable.source_task_id)
+        self.assertTrue(Path(deliverable.output_path).exists())
 
 
 if __name__ == "__main__":

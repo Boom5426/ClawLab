@@ -6,6 +6,7 @@ import typer
 
 from clawlab.core.constants import SUPPORTED_TASK_TYPES
 from clawlab.services.asset_service import retrieve_assets_for_task
+from clawlab.services.employee_service import get_employee_spec, list_employee_specs
 from clawlab.services.llm_service import get_llm_runtime_status
 from clawlab.services.draft_service import generate_draft
 from clawlab.services.ingest_service import read_cv_text
@@ -38,10 +39,12 @@ app = typer.Typer(help="ClawLab CLI MVP")
 project_app = typer.Typer(help="Project commands")
 task_app = typer.Typer(help="Task commands")
 config_app = typer.Typer(help="Config commands")
+employees_app = typer.Typer(help="Employee commands")
 
 app.add_typer(project_app, name="project")
 app.add_typer(task_app, name="task")
 app.add_typer(config_app, name="config")
+app.add_typer(employees_app, name="employees")
 
 
 def _read_text_file(path: Path) -> str:
@@ -170,6 +173,7 @@ def status_command() -> None:
         f"drafts={config.llm.use_llm_for_drafts} ({draft_status}), "
         f"learning={config.llm.use_llm_for_learning} ({learning_status})"
     )
+    typer.echo(f"- employees: {', '.join(spec.role_name for spec in list_employee_specs())}")
     if state.profile:
         typer.echo(f"- profile: {state.profile.name} | {state.profile.role} | {state.profile.discipline}")
     else:
@@ -195,11 +199,25 @@ def status_command() -> None:
             summary = load_material_summary(latest_task.material_summary_path)
             if summary:
                 typer.echo(f"  summary short: {summary.short_summary}")
+                if summary.key_topics:
+                    typer.echo(f"  summary topics: {', '.join(summary.key_topics[:5])}")
+                if summary.methods_or_entities:
+                    typer.echo(f"  summary methods/entities: {', '.join(summary.methods_or_entities[:5])}")
         if latest_task.task_plan_path:
             plan = load_task_plan(latest_task.task_plan_path)
             if plan:
                 typer.echo(f"  plan strategy: {plan.output_strategy}")
                 typer.echo(f"  plan key points: {' | '.join(plan.key_points_to_cover[:3])}")
+                if plan.recommended_structure:
+                    typer.echo(f"  plan structure: {' | '.join(plan.recommended_structure[:4])}")
+                if plan.selected_assets:
+                    typer.echo(f"  plan selected assets: {' | '.join(plan.selected_assets[:3])}")
+        if latest_task.retrieved_asset_ids:
+            retrieved_assets = [asset for asset in state.assets if asset.id in set(latest_task.retrieved_asset_ids)]
+            if retrieved_assets:
+                typer.echo("  retrieved asset titles:")
+                for asset in retrieved_assets[:3]:
+                    typer.echo(f"    - {asset.asset_type}: {asset.title}")
         if latest_task.feedback_summary:
             typer.echo(f"  learning: {latest_task.feedback_summary}")
     else:
@@ -347,6 +365,33 @@ def config_show() -> None:
     typer.echo(f"- use_llm_for_drafts: {config.llm.use_llm_for_drafts}")
     typer.echo(f"- use_llm_for_learning: {config.llm.use_llm_for_learning}")
     typer.echo(f"- openai_base_url: {config.llm.openai_base_url}")
+
+
+@employees_app.command("list")
+def employees_list() -> None:
+    """List available employee roles."""
+    typer.echo("Available employees")
+    for spec in list_employee_specs():
+        typer.echo(f"- {spec.role_name}: {spec.display_name}")
+        typer.echo(f"  {spec.description}")
+
+
+@employees_app.command("show")
+def employees_show(role: str) -> None:
+    """Show one employee role in detail."""
+    try:
+        spec = get_employee_spec(role)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Employee: {spec.role_name}")
+    typer.echo(f"- display_name: {spec.display_name}")
+    typer.echo(f"- description: {spec.description}")
+    typer.echo(f"- core_capabilities: {', '.join(spec.core_capabilities)}")
+    typer.echo(f"- supported_task_types: {', '.join(spec.supported_task_types)}")
+    typer.echo(f"- accessible_context: {', '.join(spec.accessible_context)}")
+    typer.echo(f"- default_templates: {', '.join(spec.default_templates)}")
+    typer.echo(f"- memory_scope: {', '.join(spec.memory_scope)}")
 
 
 if __name__ == "__main__":

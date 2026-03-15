@@ -72,6 +72,48 @@ ClawLab 当前不会只把学习结果埋在 JSON 里。
 
 只要这个闭环稳定成立，ClawLab 才有资格继续往更复杂的方向扩展。
 
+## From research workflow kernel to virtual research company
+
+下一阶段，ClawLab 可以在当前内核之上演化出“虚拟研究公司”模式：
+
+- 用户作为老板 / 创始人
+- 经理型 Agent 负责统筹
+- 专项 Agent 负责执行具体工作
+
+但这层变化应该首先发生在上层产品隐喻和协作编排层，而不是立刻推翻当前底层模型。
+
+当前稳定对象例如 `ResearcherProfile`、`ProjectCard`、`TaskCard`、`ReusableAsset`、`MaterialSummary` 和 `TaskPlan`，更适合作为长期保留的 kernel state。
+
+相关文档见：
+
+- `docs/current-kernel.md`
+- `docs/company-mapping.md`
+- `docs/architecture-diagram.md`
+
+## 第一版员工层
+
+在不推翻当前 kernel 的前提下，ClawLab 现在已经增加了第一版员工层。
+
+当前注册了 4 个角色：
+
+- `literature_analyst`
+- `project_manager`
+- `draft_writer`
+- `review_editor`
+
+这些员工不是独立系统，而是对现有能力的岗位化包装：
+
+- `literature_analyst` 复用材料摘要能力
+- `project_manager` 复用资产检索与任务规划
+- `draft_writer` 复用 draft generation
+- `review_editor` 复用 revision learning
+
+也就是说，未来如果继续往经理层演进，调度的将是这批已有真实能力的员工，而不是空角色。
+
+详细说明见：
+
+- `docs/employees.md`
+
 ## 当前最小闭环
 
 当前 MVP 支持下面这条完整链路：

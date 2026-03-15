@@ -10,6 +10,9 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+EmployeeRole = Literal["literature_analyst", "project_manager", "draft_writer", "review_editor"]
+
+
 class ResearcherProfile(BaseModel):
     id: str
     name: str
@@ -126,4 +129,38 @@ class TaskPlan(BaseModel):
     recommended_structure: list[str] = Field(default_factory=list)
     project_considerations: list[str] = Field(default_factory=list)
     selected_assets: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now)
+
+
+class EmployeeSpec(BaseModel):
+    id: str
+    role_name: EmployeeRole
+    display_name: str
+    description: str
+    core_capabilities: list[str] = Field(default_factory=list)
+    supported_task_types: list[str] = Field(default_factory=list)
+    accessible_context: list[str] = Field(default_factory=list)
+    default_templates: list[str] = Field(default_factory=list)
+    memory_scope: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now)
+
+
+class WorkOrder(BaseModel):
+    id: str
+    employee_role: EmployeeRole
+    project_card_id: str
+    task_type: Literal["literature-outline", "paper-outline"] | None = None
+    objective: str
+    input_refs: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now)
+
+
+class Deliverable(BaseModel):
+    id: str
+    employee_role: EmployeeRole
+    source_task_id: str | None = None
+    source_work_order_id: str | None = None
+    title: str
+    summary: str
+    output_path: str
     created_at: str = Field(default_factory=utc_now)

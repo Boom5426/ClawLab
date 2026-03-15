@@ -12,6 +12,7 @@ from clawlab.core.constants import (
     TASKS_INDEX_FILENAME,
 )
 from clawlab.core.models import (
+    Deliverable,
     MaterialSummary,
     ProjectCard,
     ResearcherProfile,
@@ -102,8 +103,16 @@ def get_project_materials_dir(project_id: str, repo_root: Path | None = None) ->
     return get_project_dir(project_id, repo_root) / "materials"
 
 
+def get_project_deliverables_dir(project_id: str, repo_root: Path | None = None) -> Path:
+    return get_project_dir(project_id, repo_root) / "deliverables"
+
+
 def get_material_summary_path(project_id: str, summary_id: str, repo_root: Path | None = None) -> Path:
     return get_project_materials_dir(project_id, repo_root) / f"{summary_id}.json"
+
+
+def get_deliverable_path(project_id: str, deliverable_id: str, repo_root: Path | None = None) -> Path:
+    return get_project_deliverables_dir(project_id, repo_root) / f"{deliverable_id}.json"
 
 
 def get_tasks_root(repo_root: Path | None = None) -> Path:
@@ -178,6 +187,7 @@ def save_project(project: ProjectCard, repo_root: Path | None = None) -> Path:
     ensure_directory(get_outputs_dir(project.id, repo_root))
     ensure_directory(get_project_assets_dir(project.id, repo_root))
     ensure_directory(get_project_materials_dir(project.id, repo_root))
+    ensure_directory(get_project_deliverables_dir(project.id, repo_root))
     ensure_directory(get_project_notes_dir(project.id, repo_root))
     path = get_project_path(project.id, repo_root)
     write_model(path, project)
@@ -270,6 +280,12 @@ def save_material_summary(project_id: str, summary: MaterialSummary, repo_root: 
     summary_path = get_material_summary_path(project_id, summary.id, repo_root)
     write_model(summary_path, summary)
     return summary_path
+
+
+def save_deliverable(project_id: str, deliverable: Deliverable, repo_root: Path | None = None) -> Path:
+    deliverable_path = get_deliverable_path(project_id, deliverable.id, repo_root)
+    write_model(deliverable_path, deliverable)
+    return deliverable_path
 
 
 def load_material_summary(path: str | Path, repo_root: Path | None = None) -> MaterialSummary | None:

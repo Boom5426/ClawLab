@@ -10,22 +10,44 @@ from clawlab.services.llm_service import call_llm, is_llm_enabled
 from clawlab.utils.ids import create_id
 
 
-def _derive_writing_rules(generated_text: str, revised_text: str) -> list[str]:
-    rules: list[str] = []
+def _infer_revision_signals(generated_text: str, revised_text: str) -> list[str]:
+    signals: list[str] = []
     generated_lines = [line.strip() for line in generated_text.splitlines() if line.strip()]
     revised_lines = [line.strip() for line in revised_text.splitlines() if line.strip()]
 
     if len(revised_text) < len(generated_text):
-        rules.append("Keep drafts tighter and remove repeated framing.")
+        signals.append("compressed_expression")
     if len(revised_lines) > len(generated_lines):
+        signals.append("added_background")
+    if revised_text.count("##") != generated_text.count("##"):
+        signals.append("adjusted_structure")
+    generic_markers = ("broad", "general", "overview", "important", "helpful", "useful")
+    generated_generic = sum(marker in generated_text.lower() for marker in generic_markers)
+    revised_generic = sum(marker in revised_text.lower() for marker in generic_markers)
+    if revised_generic < generated_generic:
+        signals.append("removed_generic_framing")
+    if "gap" in revised_text.lower() and "gap" not in generated_text.lower():
+        signals.append("made_gap_explicit")
+    return signals
+
+
+def _derive_writing_rules(generated_text: str, revised_text: str) -> list[str]:
+    rules: list[str] = []
+    signals = _infer_revision_signals(generated_text, revised_text)
+    generated_lines = [line.strip() for line in generated_text.splitlines() if line.strip()]
+    revised_lines = [line.strip() for line in revised_text.splitlines() if line.strip()]
+
+    if "compressed_expression" in signals:
+        rules.append("Keep drafts tighter and remove repeated framing.")
+    if "added_background" in signals:
         rules.append("Add missing project-specific background only when it changes the argument.")
-    if revised_text.count("##") > generated_text.count("##"):
+    if "adjusted_structure" in signals and revised_text.count("##") > generated_text.count("##"):
         rules.append("Use clearer hierarchical headings instead of long bullet runs.")
     if "evidence" in revised_text.lower() and "evidence" not in generated_text.lower():
         rules.append("Anchor claims with explicit evidence language earlier.")
-    if any("gap" in line.lower() for line in revised_lines) and not any("gap" in line.lower() for line in generated_lines):
+    if "made_gap_explicit" in signals:
         rules.append("State the project-specific gap explicitly instead of implying it.")
-    if Counter(line.startswith("- ") for line in revised_lines)[True] < Counter(line.startswith("- ") for line in generated_lines)[True]:
+    if "removed_generic_framing" in signals or Counter(line.startswith("- ") for line in revised_lines)[True] < Counter(line.startswith("- ") for line in generated_lines)[True]:
         rules.append("Prefer fewer bullets and more section-level synthesis when possible.")
     if not rules:
         ratio = SequenceMatcher(a=generated_text, b=revised_text).ratio()
@@ -46,6 +68,7 @@ def derive_assets_from_revision(
     rules: list[str] | None = None
     structure_template_content: str | None = None
     project_note_content: str | None = None
+    revision_signals = _infer_revision_signals(generated_text, revised_text)
 
     if llm_settings and is_llm_enabled(llm_settings, "learning"):
         try:
@@ -115,7 +138,8 @@ def derive_assets_from_revision(
             content=project_note_content
             or (
                 f"Recent revision for {project.title} emphasizes a tighter storyline that directly resolves the "
-                f"current blocker: {'; '.join(project.blockers) or 'no blocker listed'}."
+                f"current blocker: {'; '.join(project.blockers) or 'no blocker listed'}. "
+                f"Observed revision signals: {', '.join(revision_signals) or 'no dominant signal'}."
             ),
             confidence=0.76,
             source_task_id=task.id,
@@ -130,7 +154,7 @@ def derive_assets_from_revision(
         update={
             "feedback_summary": (
                 f"Extracted {len(rules)} writing rule(s), one structure template candidate, "
-                "and one project note update."
+                f"and one project note update. Signals: {', '.join(revision_signals) or 'none'}."
             ),
             "updated_at": timestamp,
         }
