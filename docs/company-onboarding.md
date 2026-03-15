@@ -61,8 +61,8 @@ ClawLab 当前已经有稳定的底层内核：
 因为当前系统虽然已经有内核、员工、经理，但首次使用体验仍然偏技术化：
 
 - 先 init
-- 再 ingest-cv
-- 再 project create
+- 可选 ingest-cv
+- 再 company init / project create
 
 对用户来说，这更像在装配系统，而不像在启动自己的虚拟研究公司。
 
@@ -80,7 +80,8 @@ ClawLab 当前已经有稳定的底层内核：
 
 同时系统会：
 
-- 读取已有 `ResearcherProfile`
+- 优先读取已有 `ResearcherProfile`
+- 如果还没有 profile，就先用最小 founder intake 创建一个基础档案
 - 连接已有 active project
 - 推荐一个 starter team
 - 落盘 founder / company / team 配置

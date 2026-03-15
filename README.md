@@ -85,6 +85,21 @@ ClawLab 当前默认按 API-first 范式运行：
 
 ```bash
 clawlab init
+```
+
+### 4. 可选：先导入你的简历
+
+如果你手头已经有简历，推荐先导入。这样后面的 founder / company / team 初始化会更顺，很多问题系统可以直接带默认值。
+
+```bash
+clawlab ingest-cv examples/cv.txt
+```
+
+这一步会创建或更新你的研究者档案，作为后续 founder / boss context 的底座。
+
+### 5. 启动公司 onboarding
+
+```bash
 clawlab company init
 ```
 
@@ -93,18 +108,11 @@ clawlab company init
 - 本地 `workspace/`
 - founder / company / team 配置
 - 一家最小可运行的虚拟研究公司
+- 如果你还没有导入简历，`company init` 会先用几条最小问题帮你创建基础 researcher profile
 - 如果还没有 active project，`company init` 会顺手带你创建第一个项目
 - 完成后会直接给出一条可复制的第一份 `job run` 命令
 
-### 4. 导入你的简历
-
-```bash
-clawlab ingest-cv examples/cv.txt
-```
-
-这一步会创建你的研究者档案，作为后续 founder / boss context 的底座。
-
-### 5. 创建当前项目
+### 6. 创建当前项目
 
 如果你已经在 `company init` 里建好了第一个项目，这一步可以跳过。
 
@@ -120,7 +128,7 @@ clawlab project create
 
 系统会从真实材料里生成 `ProjectCard`，而不是只让你填碎片化表单。
 
-### 6. 查看公司状态
+### 7. 查看公司状态
 
 ```bash
 clawlab company status
@@ -135,7 +143,7 @@ clawlab company status
 - recent deliverables
 - handbook / memory 更新
 
-### 7. 给公司派一个工作
+### 8. 给公司派一个工作
 
 ```bash
 clawlab job run literature-brief \
@@ -157,7 +165,7 @@ clawlab task run literature-outline \
 - `job run` 是经理统筹模式，按员工链路执行
 - `task run` 是底层技术能力，直接跑单任务
 
-### 8. 修改草稿，然后让公司学习
+### 9. 修改草稿，然后让公司学习
 
 ```bash
 clawlab learn --task <task_id> --revised examples/revised_outline.md
@@ -176,7 +184,8 @@ clawlab learn --task <task_id> --revised examples/revised_outline.md
 
 ```text
 init
--> ingest-cv
+-> ingest-cv (optional but recommended)
+-> company init
 -> project create
 -> task run / job run
 -> 生成 draft

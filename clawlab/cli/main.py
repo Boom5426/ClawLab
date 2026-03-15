@@ -29,7 +29,7 @@ from clawlab.services.ingest_service import read_cv_text
 from clawlab.services.learning_service import derive_assets_from_revision
 from clawlab.services.material_service import condense_material
 from clawlab.services.planning_service import create_task_plan
-from clawlab.services.profile_service import parse_cv_to_profile
+from clawlab.services.profile_service import create_profile_from_founder_intake, parse_cv_to_profile
 from clawlab.services.project_service import create_project_from_intake
 from clawlab.services.workspace_service import (
     get_outputs_dir,
@@ -277,7 +277,8 @@ def init_command() -> None:
     typer.echo(f"- workspace root: {config.workspace_root}")
     typer.echo("- runtime: API-first (hybrid + openai)")
     _emit_api_first_guidance(config)
-    typer.echo("- next: run `clawlab ingest-cv <path>`")
+    typer.echo("- next: run `clawlab company init`")
+    typer.echo("- optional first: run `clawlab ingest-cv <path>` to preload your profile from a CV")
 
 
 @app.command("ingest-cv")
@@ -290,9 +291,15 @@ def ingest_cv(path: Path) -> None:
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     profile = parse_cv_to_profile(cv_text)
+    existing_profile = load_profile()
+    action = "Created"
+    if existing_profile is not None:
+        profile.id = existing_profile.id
+        profile.created_at = existing_profile.created_at
+        action = "Updated"
     saved_path = save_profile(profile)
 
-    typer.echo("Created ResearcherProfile.")
+    typer.echo(f"{action} ResearcherProfile.")
     typer.echo(f"- id: {profile.id}")
     typer.echo(f"- name: {profile.name}")
     typer.echo(f"- role: {profile.role}")
@@ -610,6 +617,9 @@ def config_show() -> None:
     typer.echo(f"- use_llm_for_drafts: {config.llm.use_llm_for_drafts}")
     typer.echo(f"- use_llm_for_learning: {config.llm.use_llm_for_learning}")
     typer.echo(f"- openai_base_url: {config.llm.openai_base_url}")
+    typer.echo(f"- timeout: {config.llm.timeout}")
+    typer.echo(f"- max_tokens: {config.llm.max_tokens}")
+    typer.echo(f"- api_key: {'configured' if config.llm.api_key else 'from env / missing'}")
     typer.echo("- note: current default is API-first; without OPENAI_API_KEY the system falls back per module")
 
 
@@ -647,7 +657,17 @@ def company_init() -> None:
     _emit_api_first_guidance(config)
     profile = load_profile()
     if profile is None:
-        _fail("No profile found. 先运行 `clawlab ingest-cv <path>`，再来开公司。")
+        typer.echo("还没有 ResearcherProfile。")
+        typer.echo("你可以稍后再导入简历；现在先用最小信息创建一个 founder profile。")
+        profile = create_profile_from_founder_intake(
+            name=typer.prompt("你怎么称呼？"),
+            role=typer.prompt("你当前的研究者身份是什么？", default="Independent Researcher"),
+            discipline=typer.prompt("你主要的研究方向是什么？", default="Interdisciplinary Research"),
+            subfield=typer.prompt("如果要补一句更具体的子方向，可以写在这里", default=""),
+        )
+        saved_profile_path = save_profile(profile)
+        typer.echo(f"- saved profile: {saved_profile_path}")
+        typer.echo("- note: 之后运行 `clawlab ingest-cv <path>` 会在此基础上补全你的研究者档案。")
 
     typer.echo("欢迎来到 ClawLab。下面开始为你搭建第一版虚拟研究公司。")
     founder_mission = typer.prompt("作为创始人，你想让这家公司帮你完成什么？")

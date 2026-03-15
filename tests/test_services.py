@@ -30,7 +30,7 @@ from clawlab.services.llm_service import get_llm_runtime_status
 from clawlab.services.manager_service import create_manager_plan, dispatch_work_orders, synthesize_job_result
 from clawlab.services.material_service import condense_material, detect_material_type, extract_text, read_material
 from clawlab.services.planning_service import create_task_plan
-from clawlab.services.profile_service import parse_cv_to_profile
+from clawlab.services.profile_service import create_profile_from_founder_intake, parse_cv_to_profile
 from clawlab.services.project_service import create_project_from_answers, create_project_from_intake
 from clawlab.services.workspace_service import (
     load_company_job,
@@ -80,6 +80,21 @@ Tools: Python, R, Git
     def test_ingest_service_reads_text_files(self) -> None:
         text = read_cv_text(Path("examples/cv.txt"))
         self.assertIn("Li Wei", text)
+
+    def test_create_profile_from_founder_intake_builds_minimal_profile(self) -> None:
+        profile = create_profile_from_founder_intake(
+            name="Chen Yu",
+            role="Assistant Professor",
+            discipline="Computer Science",
+            subfield="AI for Science",
+        )
+
+        self.assertEqual(profile.name, "Chen Yu")
+        self.assertEqual(profile.role, "Assistant Professor")
+        self.assertEqual(profile.discipline, "Computer Science")
+        self.assertEqual(profile.subfield, "AI for Science")
+        self.assertIn("literature synthesis", profile.methods)
+        self.assertTrue(profile.source_cv_text)
 
     def test_detect_material_type_supports_txt_md_pdf(self) -> None:
         self.assertEqual(detect_material_type(Path("notes.txt")), "txt")

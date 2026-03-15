@@ -8,7 +8,7 @@ Current Kernel
   - ReusableAsset
   - MaterialSummary
   - TaskPlan
-  - CLI workflow: init -> ingest-cv -> project create -> task run -> learn -> status
+  - CLI workflow: init -> [optional ingest-cv] -> company init -> project create -> task run -> learn -> status
 
         |
         v

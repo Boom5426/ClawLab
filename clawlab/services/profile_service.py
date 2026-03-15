@@ -107,3 +107,41 @@ def parse_cv_to_profile(cv_text: str) -> ResearcherProfile:
         created_at=timestamp,
         updated_at=timestamp,
     )
+
+
+def create_profile_from_founder_intake(
+    *,
+    name: str,
+    role: str,
+    discipline: str,
+    subfield: str = "",
+) -> ResearcherProfile:
+    timestamp = utc_now()
+    clean_name = name.strip() or "Unknown Researcher"
+    clean_role = role.strip() or "Independent Researcher"
+    clean_discipline = discipline.strip() or "Interdisciplinary Research"
+    clean_subfield = subfield.strip() or "Focused research track"
+    source_text = "\n".join(
+        [
+            clean_name,
+            clean_role,
+            clean_discipline,
+            clean_subfield,
+        ]
+    )
+
+    return ResearcherProfile(
+        id=create_id("profile"),
+        name=clean_name,
+        role=clean_role,
+        discipline=clean_discipline,
+        subfield=clean_subfield,
+        methods=["literature synthesis"],
+        tools=["text notes"],
+        common_tasks=["Research synthesis", "Structured drafting", "Advisor updates"],
+        writing_preferences=["Prefer concise academic tone", "Keep logic visible"],
+        collaboration_preferences=["Summarize assumptions before drafting", "Keep next actions explicit"],
+        source_cv_text=source_text,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
