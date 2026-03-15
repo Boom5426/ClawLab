@@ -145,14 +145,14 @@ ClawLab 当前不会只把学习结果埋在 JSON 里。
 
 ### `clawlab project create`
 
-交互式询问 4 个问题：
+交互式创建 `ProjectCard`，当前支持三种 intake 入口：
 
-- 你当前最重要的研究项目是什么？
-- 你近期最想推进的成果是什么？
-- 你当前最卡的是哪一步？
-- 你手头有哪些材料？
+- 输入一个文件路径
+- 直接输入一段项目说明
+- 输入 `paste` 后粘贴多行内容
 
-然后生成 `ProjectCard`。
+`project create` 会优先从论文摘要、项目 brief、网站说明或研究 memo 中归纳项目信息，
+然后只额外追问一个核心目标。项目标题也可以手动覆盖，但不是必填。
 
 ### `clawlab task run <task_type> --project <project_id> --input <path>`
 

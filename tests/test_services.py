@@ -11,7 +11,7 @@ from clawlab.services.llm_service import get_llm_runtime_status
 from clawlab.services.material_service import condense_material, detect_material_type, extract_text, read_material
 from clawlab.services.planning_service import create_task_plan
 from clawlab.services.profile_service import parse_cv_to_profile
-from clawlab.services.project_service import create_project_from_answers
+from clawlab.services.project_service import create_project_from_answers, create_project_from_intake
 from clawlab.services.workspace_service import save_asset, save_project, save_project_asset
 
 
@@ -157,6 +157,31 @@ Tools: Python, R, Git
             raw_text_excerpt="Need a literature outline for treatment-resistant glioma state transitions.",
         )
         return profile, project, material_summary
+
+    def test_create_project_from_intake_uses_brief_and_goal(self) -> None:
+        profile = parse_cv_to_profile(
+            """Li Wei
+PhD Candidate in Computational Biology
+Methods: differential expression, literature synthesis
+Tools: Python, R, Git
+"""
+        )
+        project = create_project_from_intake(
+            profile,
+            project_brief=(
+                "Single-cell trajectories of resistant glioma states\n"
+                "We want to understand how treatment pressure induces reversible state switching.\n"
+                "Current challenge: the storyline is scattered across notes."
+            ),
+            current_goal="Draft a paper-outline that tightens the storyline and surfaces the main claim.",
+            source_label="examples/project_brief.md",
+        )
+
+        self.assertIn("glioma", project.title.lower())
+        self.assertIn("understand", project.research_question.lower())
+        self.assertTrue(project.materials)
+        self.assertTrue(project.blockers)
+        self.assertEqual(project.current_goal, "Draft a paper-outline that tightens the storyline and surfaces the main claim.")
 
     def test_create_project_and_generate_task_card(self) -> None:
         profile, project, material_summary = self._build_profile_project_material()

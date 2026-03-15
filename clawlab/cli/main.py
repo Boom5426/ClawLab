@@ -13,7 +13,7 @@ from clawlab.services.learning_service import derive_assets_from_revision
 from clawlab.services.material_service import condense_material
 from clawlab.services.planning_service import create_task_plan
 from clawlab.services.profile_service import parse_cv_to_profile
-from clawlab.services.project_service import create_project_from_answers
+from clawlab.services.project_service import create_project_from_intake
 from clawlab.services.workspace_service import (
     get_outputs_dir,
     init_workspace,
@@ -48,6 +48,32 @@ def _read_text_file(path: Path) -> str:
     if not path.exists():
         raise typer.BadParameter(f"File not found: {path}")
     return path.read_text(encoding="utf-8")
+
+
+def _collect_multiline_input(prompt: str) -> str:
+    typer.echo(prompt)
+    typer.echo("直接粘贴多行内容，结束时单独输入一行 `END`。")
+    lines: list[str] = []
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            break
+        if line.strip() == "END":
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _resolve_project_source(raw_value: str) -> tuple[str, str | None]:
+    candidate = Path(raw_value).expanduser()
+    if candidate.exists():
+        try:
+            text = read_cv_text(candidate)
+        except (FileNotFoundError, ValueError) as error:
+            raise typer.BadParameter(str(error)) from error
+        return text, str(candidate)
+    return raw_value.strip(), None
 
 
 def _fail(message: str) -> None:
@@ -97,23 +123,31 @@ def create_project() -> None:
     if profile is None:
         _fail("No profile found. Run `clawlab ingest-cv <path>` first.")
 
-    title = typer.prompt("你当前最重要的研究项目是什么？")
-    desired_outcome = typer.prompt("你近期最想推进的成果是什么？")
-    blocker = typer.prompt("你当前最卡的是哪一步？")
-    materials = typer.prompt("你手头有哪些材料？")
+    typer.echo("项目 intake 支持三种方式：文件路径、直接输入一句说明、或输入 `paste` 粘贴多行内容。")
+    source_input = typer.prompt("请给我当前项目材料或说明")
+    if source_input.strip().lower() == "paste":
+        project_brief = _collect_multiline_input("请粘贴项目说明、论文摘要、网站描述或研究 memo。")
+        source_label = "pasted project brief"
+    else:
+        project_brief, source_label = _resolve_project_source(source_input)
 
-    project = create_project_from_answers(
+    current_goal = typer.prompt("你这次最想推进什么？可顺带写当前卡点")
+    title_hint = typer.prompt("如果想手动指定项目标题，在这里输入；否则直接回车", default="")
+
+    project = create_project_from_intake(
         profile,
-        title=title,
-        desired_outcome=desired_outcome,
-        blocker=blocker,
-        materials=materials,
+        project_brief=project_brief,
+        current_goal=current_goal,
+        title_hint=title_hint,
+        source_label=source_label,
     )
     saved_path = save_project(project)
 
     typer.echo("Created ProjectCard.")
     typer.echo(f"- id: {project.id}")
     typer.echo(f"- title: {project.title}")
+    typer.echo(f"- research question: {project.research_question}")
+    typer.echo(f"- materials: {', '.join(project.materials[:3])}")
     typer.echo(f"- saved: {saved_path}")
 
 
