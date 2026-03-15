@@ -12,14 +12,23 @@ from clawlab.core.constants import (
     TASKS_INDEX_FILENAME,
 )
 from clawlab.core.models import (
+    MaterialSummary,
     ProjectCard,
     ResearcherProfile,
     ReusableAsset,
     TaskCard,
+    TaskPlan,
     WorkspaceConfig,
     WorkspaceState,
 )
-from clawlab.storage.filesystem import ensure_directory, read_json, read_model, write_json, write_model
+from clawlab.storage.filesystem import ensure_directory, read_json, read_model, write_json, write_model, write_text
+
+
+ASSET_MARKDOWN_DIRS = {
+    "writing_rule": "writing-rules",
+    "structure_template": "templates",
+    "project_note": "project-notes",
+}
 
 
 def get_repo_root() -> Path:
@@ -55,6 +64,8 @@ def init_workspace(repo_root: Path | None = None) -> WorkspaceConfig:
     ensure_directory(workspace_root / "projects")
     ensure_directory(workspace_root / "assets")
     ensure_directory(workspace_root / "tasks")
+    for directory in ASSET_MARKDOWN_DIRS.values():
+        ensure_directory(workspace_root / "assets" / directory)
 
     config = WorkspaceConfig(workspace_root=str(workspace_root.relative_to(repo_root or get_repo_root())))
     save_config(config, repo_root)
@@ -87,6 +98,14 @@ def get_project_assets_dir(project_id: str, repo_root: Path | None = None) -> Pa
     return get_project_dir(project_id, repo_root) / "assets"
 
 
+def get_project_materials_dir(project_id: str, repo_root: Path | None = None) -> Path:
+    return get_project_dir(project_id, repo_root) / "materials"
+
+
+def get_material_summary_path(project_id: str, summary_id: str, repo_root: Path | None = None) -> Path:
+    return get_project_materials_dir(project_id, repo_root) / f"{summary_id}.json"
+
+
 def get_tasks_root(repo_root: Path | None = None) -> Path:
     return get_workspace_root(repo_root) / "tasks"
 
@@ -95,12 +114,49 @@ def get_task_path(task_id: str, repo_root: Path | None = None) -> Path:
     return get_tasks_root(repo_root) / task_id / TASK_FILENAME
 
 
+def get_task_plan_path(task_id: str, repo_root: Path | None = None) -> Path:
+    return get_tasks_root(repo_root) / task_id / "task_plan.json"
+
+
 def get_assets_root(repo_root: Path | None = None) -> Path:
     return get_workspace_root(repo_root) / "assets"
 
 
 def get_asset_path(asset_id: str, repo_root: Path | None = None) -> Path:
     return get_assets_root(repo_root) / f"{asset_id}.json"
+
+
+def get_asset_markdown_path(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
+    directory = ASSET_MARKDOWN_DIRS[asset.asset_type]
+    return get_assets_root(repo_root) / directory / f"{asset.id}.md"
+
+
+def get_project_notes_dir(project_id: str, repo_root: Path | None = None) -> Path:
+    return get_project_dir(project_id, repo_root) / "notes"
+
+
+def get_project_asset_markdown_path(project_id: str, asset: ReusableAsset, repo_root: Path | None = None) -> Path:
+    if asset.asset_type == "project_note":
+        return get_project_notes_dir(project_id, repo_root) / f"{asset.id}.md"
+    return get_project_assets_dir(project_id, repo_root) / f"{asset.id}.md"
+
+
+def _render_asset_markdown(asset: ReusableAsset) -> str:
+    return "\n".join(
+        [
+            f"# {asset.title}",
+            "",
+            f"- asset_type: {asset.asset_type}",
+            f"- scope: {asset.scope}",
+            f"- confidence: {asset.confidence:.2f}",
+            f"- source_task_id: {asset.source_task_id}",
+            f"- created_at: {asset.created_at}",
+            "",
+            "## Content",
+            asset.content,
+            "",
+        ]
+    )
 
 
 def save_profile(profile: ResearcherProfile, repo_root: Path | None = None) -> Path:
@@ -121,6 +177,8 @@ def save_project(project: ProjectCard, repo_root: Path | None = None) -> Path:
     ensure_directory(project_dir)
     ensure_directory(get_outputs_dir(project.id, repo_root))
     ensure_directory(get_project_assets_dir(project.id, repo_root))
+    ensure_directory(get_project_materials_dir(project.id, repo_root))
+    ensure_directory(get_project_notes_dir(project.id, repo_root))
     path = get_project_path(project.id, repo_root)
     write_model(path, project)
     config = load_config(repo_root)
@@ -157,6 +215,23 @@ def save_task(task: TaskCard, repo_root: Path | None = None) -> Path:
     return path
 
 
+def save_task_plan(task_id: str, plan: TaskPlan, repo_root: Path | None = None) -> Path:
+    task_dir = get_tasks_root(repo_root) / task_id
+    ensure_directory(task_dir)
+    path = get_task_plan_path(task_id, repo_root)
+    write_model(path, plan)
+    return path
+
+
+def load_task_plan(path: str | Path, repo_root: Path | None = None) -> TaskPlan | None:
+    plan_path = Path(path)
+    if not plan_path.is_absolute():
+        plan_path = (repo_root or get_repo_root()) / plan_path
+    if not plan_path.exists():
+        return None
+    return read_model(plan_path, TaskPlan)
+
+
 def load_task(task_id: str, repo_root: Path | None = None) -> TaskCard | None:
     path = get_task_path(task_id, repo_root)
     if not path.exists():
@@ -174,6 +249,7 @@ def load_tasks(repo_root: Path | None = None) -> list[TaskCard]:
 def save_asset(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
     path = get_asset_path(asset.id, repo_root)
     write_model(path, asset)
+    write_text(get_asset_markdown_path(asset, repo_root), _render_asset_markdown(asset))
 
     index_path = get_assets_root(repo_root) / ASSETS_INDEX_FILENAME
     existing = read_json(index_path) if index_path.exists() else []
@@ -186,7 +262,23 @@ def save_asset(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
 def save_project_asset(project_id: str, asset: ReusableAsset, repo_root: Path | None = None) -> Path:
     project_asset_path = get_project_assets_dir(project_id, repo_root) / f"{asset.id}.json"
     write_model(project_asset_path, asset)
+    write_text(get_project_asset_markdown_path(project_id, asset, repo_root), _render_asset_markdown(asset))
     return project_asset_path
+
+
+def save_material_summary(project_id: str, summary: MaterialSummary, repo_root: Path | None = None) -> Path:
+    summary_path = get_material_summary_path(project_id, summary.id, repo_root)
+    write_model(summary_path, summary)
+    return summary_path
+
+
+def load_material_summary(path: str | Path, repo_root: Path | None = None) -> MaterialSummary | None:
+    summary_path = Path(path)
+    if not summary_path.is_absolute():
+        summary_path = (repo_root or get_repo_root()) / summary_path
+    if not summary_path.exists():
+        return None
+    return read_model(summary_path, MaterialSummary)
 
 
 def load_assets(repo_root: Path | None = None) -> list[ReusableAsset]:

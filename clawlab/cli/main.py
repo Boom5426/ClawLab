@@ -5,31 +5,43 @@ from pathlib import Path
 import typer
 
 from clawlab.core.constants import SUPPORTED_TASK_TYPES
+from clawlab.services.asset_service import retrieve_assets_for_task
+from clawlab.services.llm_service import get_llm_runtime_status
 from clawlab.services.draft_service import generate_draft
-from clawlab.services.ingest_service import read_cv_text, read_material
+from clawlab.services.ingest_service import read_cv_text
 from clawlab.services.learning_service import derive_assets_from_revision
+from clawlab.services.material_service import condense_material
+from clawlab.services.planning_service import create_task_plan
 from clawlab.services.profile_service import parse_cv_to_profile
 from clawlab.services.project_service import create_project_from_answers
 from clawlab.services.workspace_service import (
     get_outputs_dir,
     init_workspace,
+    load_config,
+    load_assets,
+    load_material_summary,
     load_current_state,
     load_profile,
     load_project,
     load_task,
+    load_task_plan,
     save_asset,
+    save_material_summary,
     save_project_asset,
     save_profile,
     save_project,
     save_task,
+    save_task_plan,
 )
 
 app = typer.Typer(help="ClawLab CLI MVP")
 project_app = typer.Typer(help="Project commands")
 task_app = typer.Typer(help="Task commands")
+config_app = typer.Typer(help="Config commands")
 
 app.add_typer(project_app, name="project")
 app.add_typer(task_app, name="task")
+app.add_typer(config_app, name="config")
 
 
 def _read_text_file(path: Path) -> str:
@@ -41,6 +53,12 @@ def _read_text_file(path: Path) -> str:
 def _fail(message: str) -> None:
     typer.echo(message)
     raise typer.Exit(code=1)
+
+
+def _emit_llm_fallback_message(config, module_name: str) -> None:
+    enabled, reason = get_llm_runtime_status(config.llm, module_name)
+    if config.llm.mode == "hybrid" and getattr(config.llm, f"use_llm_for_{module_name}", False) and not enabled:
+        typer.echo(f"LLM fallback for {module_name}: {reason}. Using rule-based mode.")
 
 
 @app.command("init")
@@ -102,9 +120,22 @@ def create_project() -> None:
 @app.command("status")
 def status_command() -> None:
     """Show current profile, active project, latest task, and latest assets."""
+    config = load_config()
     state = load_current_state()
 
     typer.echo("ClawLab Status")
+    typer.echo(f"- mode: {config.llm.mode}")
+    typer.echo(f"- provider: {config.llm.provider}")
+    typer.echo(f"- model: {config.llm.model}")
+    material_status = get_llm_runtime_status(config.llm, "materials")[1]
+    draft_status = get_llm_runtime_status(config.llm, "drafts")[1]
+    learning_status = get_llm_runtime_status(config.llm, "learning")[1]
+    typer.echo(
+        "- llm modules: "
+        f"materials={config.llm.use_llm_for_materials} ({material_status}), "
+        f"drafts={config.llm.use_llm_for_drafts} ({draft_status}), "
+        f"learning={config.llm.use_llm_for_learning} ({learning_status})"
+    )
     if state.profile:
         typer.echo(f"- profile: {state.profile.name} | {state.profile.role} | {state.profile.discipline}")
     else:
@@ -122,6 +153,19 @@ def status_command() -> None:
         typer.echo(f"  draft: {latest_task.generated_draft_path}")
         typer.echo(f"  materials: {', '.join(latest_task.input_material_paths)}")
         typer.echo(f"  material types: {', '.join(latest_task.input_material_types)}")
+        typer.echo(f"  material summary: {'yes' if latest_task.material_summary_path else 'no'}")
+        typer.echo(f"  retrieved assets: {len(latest_task.retrieved_asset_ids)}")
+        if latest_task.material_summary_title:
+            typer.echo(f"  summary title: {latest_task.material_summary_title}")
+        if latest_task.material_summary_path:
+            summary = load_material_summary(latest_task.material_summary_path)
+            if summary:
+                typer.echo(f"  summary short: {summary.short_summary}")
+        if latest_task.task_plan_path:
+            plan = load_task_plan(latest_task.task_plan_path)
+            if plan:
+                typer.echo(f"  plan strategy: {plan.output_strategy}")
+                typer.echo(f"  plan key points: {' | '.join(plan.key_points_to_cover[:3])}")
         if latest_task.feedback_summary:
             typer.echo(f"  learning: {latest_task.feedback_summary}")
     else:
@@ -152,28 +196,63 @@ def task_run(
     project_card = load_project(project)
     if project_card is None:
         _fail(f"Project not found: {project}")
+    config = load_config()
+    _emit_llm_fallback_message(config, "materials")
+    _emit_llm_fallback_message(config, "drafts")
 
     try:
-        material = read_material(input_path)
+        material_summary = condense_material(input_path, project_card, config.llm)
     except FileNotFoundError as error:
         raise typer.BadParameter(str(error)) from error
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
+
+    material_summaries = [material_summary]
+    retrieved_assets = retrieve_assets_for_task(
+        task_type=task_type,
+        project=project_card,
+        profile=profile,
+        material_summaries=material_summaries,
+        assets=load_assets(),
+    )
+    task_plan = create_task_plan(
+        task_type=task_type,
+        profile=profile,
+        project=project_card,
+        material_summaries=material_summaries,
+        retrieved_assets=retrieved_assets,
+        llm_settings=config.llm,
+    )
+    summary_path = save_material_summary(project_card.id, material_summary)
     output_dir = get_outputs_dir(project_card.id)
     task, draft_path = generate_draft(
         profile,
         project_card,
         task_type=task_type,
-        material=material,
+        material_summaries=material_summaries,
+        retrieved_assets=retrieved_assets,
+        task_plan=task_plan,
         output_dir=output_dir,
         workspace_root=Path.cwd() / "workspace",
+        llm_settings=config.llm,
+    )
+    plan_path = save_task_plan(task.id, task_plan)
+    task = task.model_copy(
+        update={
+            "material_summary_path": str(summary_path.relative_to(Path.cwd())),
+            "material_summary_title": material_summary.title,
+            "task_plan_path": str(plan_path.relative_to(Path.cwd())),
+        }
     )
     save_task(task)
 
     typer.echo("Generated draft and TaskCard.")
     typer.echo(f"- task id: {task.id}")
     typer.echo(f"- task type: {task.task_type}")
-    typer.echo(f"- input: {material.path} ({material.material_type})")
+    typer.echo(f"- input: {material_summary.source_path} ({material_summary.source_type})")
+    typer.echo(f"- material summary: {material_summary.title}")
+    typer.echo(f"- retrieved assets: {len(retrieved_assets)}")
+    typer.echo(f"- task plan strategy: {task_plan.output_strategy}")
     typer.echo(f"- draft: {draft_path}")
 
 
@@ -190,6 +269,8 @@ def learn_command(
     project_card = load_project(task_card.project_card_id)
     if project_card is None:
         _fail(f"Project not found: {task_card.project_card_id}")
+    config = load_config()
+    _emit_llm_fallback_message(config, "learning")
 
     generated_path = Path(task_card.generated_draft_path)
     if not generated_path.exists():
@@ -203,6 +284,7 @@ def learn_command(
         project_card,
         generated_text=generated_text,
         revised_text=revised_text,
+        llm_settings=config.llm,
     )
     updated_task = updated_task.model_copy(update={"revised_draft_path": str(revised)})
 
@@ -217,6 +299,20 @@ def learn_command(
     typer.echo(f"- assets created: {len(assets)}")
     for asset in assets:
         typer.echo(f"  - {asset.asset_type}: {asset.title}")
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Show the current ClawLab configuration."""
+    config = load_config()
+    typer.echo("ClawLab Config")
+    typer.echo(f"- mode: {config.llm.mode}")
+    typer.echo(f"- provider: {config.llm.provider}")
+    typer.echo(f"- model: {config.llm.model}")
+    typer.echo(f"- use_llm_for_materials: {config.llm.use_llm_for_materials}")
+    typer.echo(f"- use_llm_for_drafts: {config.llm.use_llm_for_drafts}")
+    typer.echo(f"- use_llm_for_learning: {config.llm.use_llm_for_learning}")
+    typer.echo(f"- openai_base_url: {config.llm.openai_base_url}")
 
 
 if __name__ == "__main__":
