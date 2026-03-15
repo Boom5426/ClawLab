@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 
 from clawlab.core.models import LlmSettings, MaterialSummary, ProjectCard, ResearcherProfile, ReusableAsset, TaskPlan
-from clawlab.prompts.drafts import build_draft_prompts
+from clawlab.prompts.planning import build_planning_prompts
+from clawlab.services.context_service import (
+    get_company_handbook_context,
+    get_employee_playbook_context,
+    get_recent_protocol_context,
+)
 from clawlab.services.llm_service import call_llm, is_llm_enabled
 
 
@@ -38,23 +43,29 @@ def create_task_plan(
     retrieved_assets: list[ReusableAsset],
     llm_settings: LlmSettings | None = None,
 ) -> TaskPlan:
-    if llm_settings and is_llm_enabled(llm_settings, "drafts"):
+    company_handbook_excerpt, company_sources = get_company_handbook_context()
+    playbook_excerpt, playbook_sources = get_employee_playbook_context("project_manager")
+    protocol_excerpt, protocol_sources = get_recent_protocol_context(
+        project_id=project.id,
+        employee_role="project_manager",
+    )
+    context_sources = company_sources + playbook_sources + protocol_sources
+
+    if llm_settings and is_llm_enabled(llm_settings, "planning"):
         try:
-            merged_material = material_summaries[0]
-            system_prompt, user_prompt = build_draft_prompts(
+            system_prompt, user_prompt = build_planning_prompts(
                 task_type=task_type,
                 profile=profile,
                 project=project,
-                material_summary=merged_material,
-            )
-            planning_prompt = (
-                f"{user_prompt}\n\nReturn JSON only with keys: "
-                "task_goal, output_strategy, key_points_to_cover, recommended_structure, "
-                "project_considerations, selected_assets."
+                material_summaries=material_summaries,
+                retrieved_assets=retrieved_assets,
+                company_handbook_excerpt=company_handbook_excerpt,
+                employee_playbook_excerpt=playbook_excerpt,
+                recent_protocol_excerpt=protocol_excerpt,
             )
             content = call_llm(
                 settings=llm_settings,
-                prompt=planning_prompt,
+                prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=0.15,
                 max_tokens=900,
@@ -68,6 +79,8 @@ def create_task_plan(
                 recommended_structure=payload.get("recommended_structure", []),
                 project_considerations=payload.get("project_considerations", []),
                 selected_assets=payload.get("selected_assets", []),
+                planning_mode="llm",
+                context_sources=context_sources,
             )
         except Exception:
             pass
@@ -107,4 +120,6 @@ def create_task_plan(
         recommended_structure=recommended_structure,
         project_considerations=considerations,
         selected_assets=asset_hints,
+        planning_mode="rule",
+        context_sources=context_sources,
     )

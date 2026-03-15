@@ -8,6 +8,12 @@ from pathlib import Path
 
 from clawlab.core.models import LlmSettings, MaterialDocument, MaterialSummary, ProjectCard
 from clawlab.prompts.materials import build_material_summary_prompts
+from clawlab.services.context_service import (
+    get_company_handbook_context,
+    get_employee_playbook_context,
+    get_recent_protocol_context,
+    get_relevant_assets_context,
+)
 from clawlab.services.llm_service import call_llm, is_llm_enabled
 from clawlab.utils.ids import create_id
 from clawlab.utils.text import normalize_lines
@@ -322,6 +328,18 @@ def condense_text_to_material_summary(
     project: ProjectCard | None = None,
     llm_settings: LlmSettings | None = None,
 ) -> MaterialSummary:
+    company_handbook_excerpt, company_sources = get_company_handbook_context()
+    playbook_excerpt, playbook_sources = get_employee_playbook_context("literature_analyst")
+    relevant_assets_excerpt, asset_sources, _ = get_relevant_assets_context(
+        project=project,
+        employee_role="literature_analyst",
+    )
+    recent_protocol_excerpt, protocol_sources = get_recent_protocol_context(
+        project_id=project.id if project else None,
+        employee_role="literature_analyst",
+    )
+    context_sources = company_sources + playbook_sources + asset_sources + protocol_sources
+
     if llm_settings and is_llm_enabled(llm_settings, "materials"):
         try:
             project_context = (
@@ -334,6 +352,10 @@ def condense_text_to_material_summary(
                 source_type=source_type,
                 text=text,
                 project_context=project_context,
+                company_handbook_excerpt=company_handbook_excerpt,
+                employee_playbook_excerpt=playbook_excerpt,
+                relevant_assets_excerpt=relevant_assets_excerpt,
+                recent_protocol_excerpt=recent_protocol_excerpt,
             )
             content = call_llm(
                 settings=llm_settings,
@@ -354,6 +376,8 @@ def condense_text_to_material_summary(
                 useful_snippets=payload.get("useful_snippets", []),
                 relevance_to_project=payload["relevance_to_project"],
                 raw_text_excerpt=payload["raw_text_excerpt"],
+                generation_mode="llm",
+                context_sources=context_sources,
             )
         except Exception:
             pass
@@ -386,6 +410,8 @@ def condense_text_to_material_summary(
         useful_snippets=useful_snippets[:6],
         relevance_to_project=_relevance_to_project(title, cleaned, project),
         raw_text_excerpt="\n\n".join((paragraphs[:2] or lines[:6]))[:700],
+        generation_mode="rule",
+        context_sources=context_sources,
     )
 
 

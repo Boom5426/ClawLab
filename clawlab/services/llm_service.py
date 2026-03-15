@@ -15,6 +15,7 @@ def get_llm_settings(config) -> LlmSettings:
 def _module_flag(settings: LlmSettings, module_name: str) -> bool:
     return {
         "materials": settings.use_llm_for_materials,
+        "planning": settings.use_llm_for_planning,
         "drafts": settings.use_llm_for_drafts,
         "learning": settings.use_llm_for_learning,
     }[module_name]

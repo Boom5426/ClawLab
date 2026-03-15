@@ -44,12 +44,15 @@ def _asset_relevance_score(
 
     score += 5 if asset.task_type == task_type else 0
     score += 6 if asset.scope == "project" and asset.project_card_id == project.id else 0
-    score += 2 if asset.scope == "global" else 0
+    score += 3 if asset.scope == "company" else 0
+    score += 3 if asset.scope == "employee" else 0
     score += len(project_tokens & asset_tokens) * 3
     score += len(profile_tokens & asset_tokens)
     score += len(material_tokens & asset_tokens) * 2
     score += 1 if asset.asset_type == "writing_rule" else 0
     if asset.asset_type == "project_note" and asset.project_card_id == project.id:
+        score += 2
+    if asset.employee_role == "draft_writer" and asset.asset_type in {"writing_rule", "structure_template", "common_mistake"}:
         score += 2
     return score
 

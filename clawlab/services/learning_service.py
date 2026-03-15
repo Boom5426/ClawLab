@@ -6,6 +6,11 @@ import json
 
 from clawlab.core.models import LlmSettings, ProjectCard, ReusableAsset, TaskCard, utc_now
 from clawlab.prompts.learning import build_learning_prompts
+from clawlab.services.context_service import (
+    get_company_handbook_context,
+    get_employee_playbook_context,
+    get_recent_protocol_context,
+)
 from clawlab.services.llm_service import call_llm, is_llm_enabled
 from clawlab.utils.ids import create_id
 
@@ -56,6 +61,14 @@ def _derive_writing_rules(generated_text: str, revised_text: str) -> list[str]:
     return rules[:3]
 
 
+def _employee_role_for_asset(asset_type: str) -> str | None:
+    if asset_type in {"writing_rule", "structure_template", "common_mistake", "sop_seed"}:
+        return "draft_writer"
+    if asset_type == "project_note":
+        return "project_manager"
+    return None
+
+
 def derive_assets_from_revision(
     task: TaskCard,
     project: ProjectCard,
@@ -68,7 +81,15 @@ def derive_assets_from_revision(
     rules: list[str] | None = None
     structure_template_content: str | None = None
     project_note_content: str | None = None
+    role_memory_content: str | None = None
     revision_signals = _infer_revision_signals(generated_text, revised_text)
+    company_handbook_excerpt, company_sources = get_company_handbook_context()
+    playbook_excerpt, playbook_sources = get_employee_playbook_context("review_editor")
+    protocol_excerpt, protocol_sources = get_recent_protocol_context(
+        project_id=project.id,
+        employee_role="review_editor",
+    )
+    context_sources = company_sources + playbook_sources + protocol_sources
 
     if llm_settings and is_llm_enabled(llm_settings, "learning"):
         try:
@@ -77,6 +98,9 @@ def derive_assets_from_revision(
                 project=project,
                 generated_text=generated_text,
                 revised_text=revised_text,
+                company_handbook_excerpt=company_handbook_excerpt,
+                employee_playbook_excerpt=playbook_excerpt,
+                recent_protocol_excerpt=protocol_excerpt,
             )
             content = call_llm(
                 settings=llm_settings,
@@ -89,6 +113,7 @@ def derive_assets_from_revision(
             rules = payload.get("writing_rules", [])[:3]
             structure_template_content = payload.get("structure_template")
             project_note_content = payload.get("project_note")
+            role_memory_content = payload.get("role_memory")
         except Exception:
             rules = None
 
@@ -100,14 +125,17 @@ def derive_assets_from_revision(
         assets.append(
             ReusableAsset(
                 id=create_id(f"asset_rule_{index}"),
-                scope="global",
+                scope="company",
                 asset_type="writing_rule",
                 title=f"Writing rule {index}",
                 content=rule,
                 confidence=max(0.55, 0.78 - (index * 0.08)),
                 source_task_id=task.id,
                 project_card_id=project.id,
+                employee_role="draft_writer",
                 task_type=task.task_type,
+                derivation_mode="llm" if llm_settings and is_llm_enabled(llm_settings, "learning") and rules is not None else "rule",
+                context_sources=context_sources,
                 created_at=timestamp,
                 updated_at=timestamp,
             )
@@ -116,7 +144,7 @@ def derive_assets_from_revision(
     assets.append(
         ReusableAsset(
             id=create_id("asset_template"),
-            scope="task",
+            scope="employee",
             asset_type="structure_template",
             title="Outline template candidate",
             content=structure_template_content
@@ -124,7 +152,10 @@ def derive_assets_from_revision(
             confidence=0.7,
             source_task_id=task.id,
             project_card_id=project.id,
+            employee_role="draft_writer",
             task_type=task.task_type,
+            derivation_mode="llm" if role_memory_content is not None or (llm_settings and is_llm_enabled(llm_settings, "learning") and rules is not None) else "rule",
+            context_sources=context_sources,
             created_at=timestamp,
             updated_at=timestamp,
         )
@@ -145,16 +176,76 @@ def derive_assets_from_revision(
             source_task_id=task.id,
             project_card_id=project.id,
             task_type=task.task_type,
+            derivation_mode="llm" if project_note_content is not None else "rule",
+            context_sources=context_sources,
             created_at=timestamp,
             updated_at=timestamp,
         )
     )
 
+    if "removed_generic_framing" in revision_signals or "compressed_expression" in revision_signals:
+        assets.append(
+            ReusableAsset(
+                id=create_id("asset_mistake"),
+                scope="employee",
+                asset_type="common_mistake",
+                title="Common drafting mistake",
+                content="Avoid generic framing and repeated setup before making the project-specific claim.",
+                confidence=0.72,
+                source_task_id=task.id,
+                project_card_id=project.id,
+                employee_role="draft_writer",
+                task_type=task.task_type,
+                derivation_mode="rule",
+                context_sources=context_sources,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+    if "adjusted_structure" in revision_signals or "made_gap_explicit" in revision_signals:
+        assets.append(
+            ReusableAsset(
+                id=create_id("asset_sop"),
+                scope="company",
+                asset_type="sop_seed",
+                title="Draft review SOP seed",
+                content="Before finalizing a draft, verify section hierarchy, explicit gap statement, and evidence placement.",
+                confidence=0.74,
+                source_task_id=task.id,
+                project_card_id=project.id,
+                employee_role="review_editor",
+                task_type=task.task_type,
+                derivation_mode="rule",
+                context_sources=context_sources,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+    if role_memory_content:
+        assets.append(
+            ReusableAsset(
+                id=create_id("asset_role_memory"),
+                scope="employee",
+                asset_type="common_mistake",
+                title="Review editor role memory",
+                content=role_memory_content,
+                confidence=0.71,
+                source_task_id=task.id,
+                project_card_id=project.id,
+                employee_role="review_editor",
+                task_type=task.task_type,
+                derivation_mode="llm",
+                context_sources=context_sources,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+
     updated_task = task.model_copy(
         update={
             "feedback_summary": (
-                f"Extracted {len(rules)} writing rule(s), one structure template candidate, "
-                f"and one project note update. Signals: {', '.join(revision_signals) or 'none'}."
+                f"Extracted company, employee, and project memory updates. "
+                f"Signals: {', '.join(revision_signals) or 'none'}."
             ),
             "updated_at": timestamp,
         }

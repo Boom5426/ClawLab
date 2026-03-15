@@ -8,6 +8,7 @@ from clawlab.core.models import (
     EmployeeSpec,
     LlmSettings,
     MaterialSummary,
+    ManagerPlan,
     ProjectCard,
     ResearcherProfile,
     ReusableAsset,
@@ -78,7 +79,7 @@ EMPLOYEE_REGISTRY: dict[EmployeeRole, EmployeeSpec] = {
         supported_task_types=["literature-outline", "paper-outline"],
         accessible_context=["project", "task", "draft_revision"],
         default_templates=["writing_rules", "structure_template", "project_note"],
-        memory_scope=["global", "project", "task"],
+        memory_scope=["company", "project", "task"],
     ),
 }
 
@@ -111,6 +112,7 @@ def run_employee_task(
     material_summaries: list[MaterialSummary] | None = None,
     retrieved_assets: list[ReusableAsset] | None = None,
     task_plan: TaskPlan | None = None,
+    manager_plan: ManagerPlan | None = None,
     task_card: TaskCard | None = None,
     revised_path: Path | None = None,
     work_order: WorkOrder | None = None,
@@ -194,6 +196,7 @@ def run_employee_task(
             material_summaries=material_summaries,
             retrieved_assets=assets,
             task_plan=plan,
+            manager_plan=manager_plan,
             output_dir=get_outputs_dir(project.id),
             workspace_root=Path.cwd() / "workspace",
             llm_settings=llm_settings,

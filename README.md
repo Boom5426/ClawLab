@@ -1,622 +1,447 @@
 # ClawLab
 
-ClawLab 是一个面向研究人员的 Python-first CLI 研究协作系统。
+> Build your virtual research company.
 
-它的目标不是做一个花哨网页，也不是做泛化的“科研 Agent demo”，而是把你的本地仓库逐步变成一个真正可持续演进的研究工作仓库：
+ClawLab 是一个面向研究生、博士生和研究型创作者的 Python-first CLI 系统。  
+它不是网页工具，也不是一个只会临时回答问题的 Agent demo。  
+它的目标是把你的本地仓库，逐步变成一个会积累经验、会沉淀 SOP、会越来越懂你的虚拟研究公司。
 
-- 先理解你是谁
-- 再理解你当前在做什么项目
-- 然后围绕一个真实研究任务产出草稿
-- 最后从你的修改中学习，沉淀规则、模板和项目笔记
+在 ClawLab 里：
 
-一句话概括：
+- 你是老板 / 创始人
+- 员工负责读材料、做规划、写草稿、做复核
+- 经理负责派单、交接、复核、补救
+- 公司会把经验写回 handbook、playbook、project memory
 
-> ClawLab 想做的是一个会越来越懂你的本地研究协作工作台。
+默认情况下，ClawLab 不需要任何 API key 就可以完整运行。  
+如果你配置了模型接口，它也可以在不破坏本地可运行主线的前提下，进入 hybrid intelligence mode。
 
-## 我们为什么做这个
+## 为什么研究者需要 ClawLab
 
-研究人员在日常工作里有几个非常重复、但非常耗时间的问题：
+研究工作里最耗时间的，往往不是“不会做”，而是反复做这些事情：
 
 - 每次都要重新解释自己的研究背景
-- 每次都要重新说明当前项目在做什么
-- 文献、笔记、草稿、项目想法散落在不同地方，难以复用
-- AI 可以帮忙生成内容，但并不会真正记住你的项目脉络
-- 你改了很多内容，但这些修改不会沉淀成以后可复用的规则
+- 每次都要重新把项目上下文讲一遍
+- 材料、笔记、草稿、修改意见散在不同地方，复用率很低
+- AI 虽然能生成内容，但不会真正记住你的项目和风格
+- 你改了很多稿子，却很难把这些修改沉淀成以后可复用的规则
 
-ClawLab 当前就是为了解决这一类问题。
+ClawLab 想解决的就是这个问题：
 
-它不追求“一键自动科研”，而是先把最小闭环做实：
+> 不只是帮你生成一次，而是把每一次工作都变成以后还能继续利用的公司资产。
 
-1. 建立研究者档案
-2. 建立当前项目卡片
-3. 用真实材料生成任务草稿
-4. 从修订中学习
-5. 让这些学习结果留在你的本地仓库里
-6. 让这些学习结果可以被研究人员直接打开、阅读和修改
+它当前最重要的价值不是“更花哨地生成”，而是：
 
-## 当前如何沉淀学习结果
+- 让公司知道你是谁
+- 让公司知道你当前在做什么
+- 让员工按岗位协作完成工作
+- 让经验持续写回本地仓库
 
-ClawLab 当前不会只把学习结果埋在 JSON 里。
+## 你可以把它理解成什么
 
-`ReusableAsset` 会同时保存成：
+你可以把 ClawLab 理解成：
 
-- 机器可读的 JSON
-- 人可读的 Markdown
+- 一个本地研究工作流内核
+- 一个可持续积累的虚拟研究公司
+- 一个把材料、草稿、修订、规则、SOP 串起来的 CLI 仓库
 
-当前会落到这些位置：
+它当前不是：
 
-- `workspace/assets/writing-rules/*.md`
-- `workspace/assets/templates/*.md`
-- `workspace/assets/project-notes/*.md`
-- `workspace/projects/<project_id>/notes/*.md`
+- 网页产品
+- 联网检索型科研平台
+- 复杂 swarm 系统
+- 多用户团队管理系统
 
-当前 task 执行时还会额外生成：
+## 快速上手
 
-- `workspace/projects/<project_id>/materials/*.json`
-- `workspace/tasks/<task_id>/task_plan.json`
+### 1. 安装
 
-这样做的意义是：
+在仓库根目录执行：
 
-- 系统后续仍然可以程序化读取这些资产
-- 研究人员也可以直接把它们当作规则、模板、项目笔记继续维护
+```bash
+python3 -m pip install --user -e . --no-build-isolation
+```
 
-## 当前核心目标
+### 2. 初始化你的公司工作区
 
-当前版本只专注一件事：
+```bash
+clawlab init
+clawlab company init
+```
 
-> 跑通一个最小可闭环的本地研究协作流程。
+你会得到：
 
-也就是：
+- 本地 `workspace/`
+- founder / company / team 配置
+- 一家最小可运行的虚拟研究公司
 
-`init -> ingest-cv -> project create -> task run -> 手动修改 draft -> learn -> status`
+### 3. 导入你的简历
 
-只要这个闭环稳定成立，ClawLab 才有资格继续往更复杂的方向扩展。
+```bash
+clawlab ingest-cv examples/cv.txt
+```
 
-## From research workflow kernel to virtual research company
+这一步会创建你的研究者档案，作为后续 founder / boss context 的底座。
 
-下一阶段，ClawLab 可以在当前内核之上演化出“虚拟研究公司”模式：
+### 4. 创建当前项目
 
-- 用户作为老板 / 创始人
-- 经理型 Agent 负责统筹
-- 专项 Agent 负责执行具体工作
+```bash
+clawlab project create
+```
 
-但这层变化应该首先发生在上层产品隐喻和协作编排层，而不是立刻推翻当前底层模型。
+你可以：
 
-当前稳定对象例如 `ResearcherProfile`、`ProjectCard`、`TaskCard`、`ReusableAsset`、`MaterialSummary` 和 `TaskPlan`，更适合作为长期保留的 kernel state。
+- 直接粘贴项目说明
+- 指定一个文件路径
+- 输入一大段文字
 
-相关文档见：
+系统会从真实材料里生成 `ProjectCard`，而不是只让你填碎片化表单。
 
-- `docs/current-kernel.md`
-- `docs/company-mapping.md`
-- `docs/architecture-diagram.md`
+### 5. 查看公司状态
 
-## 第一版员工层
+```bash
+clawlab company status
+```
 
-在不推翻当前 kernel 的前提下，ClawLab 现在已经增加了第一版员工层。
+你会看到：
 
-当前注册了 4 个角色：
+- 公司名称 / mission
+- 当前团队
+- active project / active mission
+- recent jobs
+- recent deliverables
+- handbook / memory 更新
+
+### 6. 给公司派一个工作
+
+```bash
+clawlab job run literature-brief \
+  --project <project_id> \
+  --input examples/task_input.txt \
+  --goal "给我一份更聚焦的文献综述 brief"
+```
+
+或者：
+
+```bash
+clawlab task run literature-outline \
+  --project <project_id> \
+  --input examples/task_input.txt
+```
+
+区别是：
+
+- `job run` 是经理统筹模式，按员工链路执行
+- `task run` 是底层技术能力，直接跑单任务
+
+### 7. 修改草稿，然后让公司学习
+
+```bash
+clawlab learn --task <task_id> --revised examples/revised_outline.md
+```
+
+这一步会把修订结果写回：
+
+- company handbook
+- employee playbook
+- project memory
+- task-level trace
+
+## 5 分钟理解 ClawLab 的工作方式
+
+当前最小闭环是：
+
+```text
+init
+-> ingest-cv
+-> project create
+-> task run / job run
+-> 生成 draft
+-> 手动修改
+-> learn
+-> status
+```
+
+但在公司模式下，它实际已经更接近：
+
+```text
+materials
+-> material summaries
+-> asset retrieval
+-> task plan / manager plan
+-> draft
+-> review
+-> retry / reassign
+-> learn
+-> handbook / playbook / memory writeback
+```
+
+## 当前公司已经有什么岗位
+
+ClawLab 当前内置 4 个核心岗位：
 
 - `literature_analyst`
 - `project_manager`
 - `draft_writer`
 - `review_editor`
 
-这些员工不是独立系统，而是对现有能力的岗位化包装：
+对应能力分别是：
 
-- `literature_analyst` 复用材料摘要能力
-- `project_manager` 复用资产检索与任务规划
-- `draft_writer` 复用 draft generation
-- `review_editor` 复用 revision learning
+- `literature_analyst`：读材料，生成 `MaterialSummary`
+- `project_manager`：结合项目上下文、资产和 blocker 生成 `TaskPlan`
+- `draft_writer`：基于结构化上下文生成交付草稿
+- `review_editor`：分析修订、识别问题、写回可复用经验
 
-也就是说，未来如果继续往经理层演进，调度的将是这批已有真实能力的员工，而不是空角色。
+查看团队：
 
-详细说明见：
+```bash
+clawlab team list
+clawlab employee brief draft_writer
+```
 
-- `docs/employees.md`
+## 当前公司已经有什么协作能力
 
-## 第一版经理层
+ClawLab 不只是顺序调用岗位，它已经有第一版最小协作协议：
 
-ClawLab 现在还新增了第一版顺序化经理层。
+- `handoff`
+- `review`
+- `retry`
+- `reassign`
+- `issue_type`
+- `intervention_policy`
 
-它不会让员工自由聊天，也不做复杂 swarm，而是：
+也就是说，当前系统已经可以表达：
 
-- 根据老板目标创建 `ManagerPlan`
-- 顺序派发 `WorkOrder`
-- 收集各员工 `Deliverable`
-- 汇总成 `JobResult`
+- 上一个岗位交给下一个岗位什么
+- 为什么 review 不通过
+- 这次问题属于哪一类
+- 经理为什么介入
+- 介入后如何补救一次
 
-当前支持：
+查看最近 job 的协作链：
 
-- `clawlab job run literature-brief --project <id> --input <path> --goal "..."`
-- `clawlab job run paper-outline --project <id> --input <path> --goal "..."`
-- `clawlab job run project-brief --project <id> --input <path> --goal "..."`
+```bash
+clawlab job show <job_id>
+```
 
-详细说明见：
+## 当前支持哪些输入
 
-- `docs/manager-layer.md`
+当前重点支持：
 
-## 当前最小闭环
+- `txt`
+- `md`
+- `pdf`
 
-当前 MVP 支持下面这条完整链路：
+其中 PDF 当前支持：
 
-1. 用户初始化 workspace
-2. 用户导入 CV
-3. 用户创建当前研究项目
-4. 用户读取研究材料
-5. 用户运行一个任务
-6. 系统生成 markdown 草稿
-7. 用户手动修改草稿
-8. 系统学习修订内容
-9. 用户通过 `status` 查看系统记住了什么、项目状态是什么、系统学到了什么
+- 文本提取
+- 文本清洗
+- 结构化材料压缩
+- 生成 `MaterialSummary`
 
-## 这轮新增了哪些中间智能层
+当前不支持：
 
-当前闭环已经不再只是“输入材料 -> 直接出草稿”。
-
-这轮新增了 4 个中间层：
-
-1. `MaterialSummary`
-   - 把原始材料压缩成 task 可用上下文
-2. `Asset Retrieval`
-   - task run 前先检索已有规则、模板和项目笔记
-3. `TaskPlan`
-   - draft 前先形成结构化任务规划
-4. `Learning Writeback`
-   - learn 后把经验写回全局和项目资产
-
-这让 ClawLab 从“最小 CLI 原型”升级成“具备第一版智能骨架的研究工作仓库”。
-
-## 当前支持的输入类型
-
-### CV 导入
-
-- `.txt`
-- `.md`
-- `.rst`
-- `.pdf`
-
-### 任务材料输入
-
-- `.txt`
-- `.md`
-- `.pdf`
-
-说明：
-
-- PDF 当前只做文本提取
-- 不支持 OCR
-- 如果 PDF 没有可提取文本，会明确报错
-- PDF、txt、md 在进入任务前都会先经过“材料压缩层”
-- `task run` 不再直接主要依赖原始全文，而是优先依赖结构化 `MaterialSummary`
-
-## 当前支持的命令
-
-### `clawlab init`
-
-初始化本地工作区，创建：
-
-- `workspace/profile/`
-- `workspace/projects/`
-- `workspace/assets/`
-- `workspace/tasks/`
-
-### `clawlab ingest-cv <path>`
-
-读取 CV 文件，解析并生成 `ResearcherProfile`，保存到：
-
-- `workspace/profile/profile.json`
-
-### `clawlab project create`
-
-交互式创建 `ProjectCard`，当前支持三种 intake 入口：
-
-- 输入一个文件路径
-- 直接输入一段项目说明
-- 输入 `paste` 后粘贴多行内容
-
-`project create` 会优先从论文摘要、项目 brief、网站说明或研究 memo 中归纳项目信息，
-然后只额外追问一个核心目标。项目标题也可以手动覆盖，但不是必填。
-
-### `clawlab task run <task_type> --project <project_id> --input <path>`
-
-当前支持两类任务：
-
-- `literature-outline`
-- `paper-outline`
-
-命令会：
-
-- 读取输入材料
-- 提取文本
-- 对材料进行压缩与结构化理解
-- 结合 profile + project + material summary 生成 markdown 草稿
-- 创建 `TaskCard`
-
-### `clawlab learn --task <task_id> --revised <path>`
-
-读取生成稿和修订稿，对比后提炼：
-
-- `writing_rule`
-- `structure_template`
-- `project_note`
-
-并更新 task / assets / project。
-
-### `clawlab status`
-
-显示当前仓库状态，包括：
-
-- 当前 profile 摘要
-- 当前 active project
-- 最近 task
-- 最近 task 的输入材料路径和类型
-- 最近材料摘要是否已生成
-- 最近材料摘要标题和简短摘要
-- 最近 task 是否检索到 assets
-- 最近 task plan 的关键点
-- 最近生成的 assets
-- 当前 mode / provider / 哪些模块启用了 LLM
-
-### `clawlab config show`
-
-显示当前配置，包括：
-
-- `mode`
-- `provider`
-- `model`
-- `use_llm_for_materials`
-- `use_llm_for_drafts`
-- `use_llm_for_learning`
-
-## 当前如何处理 PDF
-
-ClawLab 当前不会把 PDF 原文直接整段塞给任务生成器。
-
-它会先经过一个最小但明确的材料理解层：
-
-1. 识别输入类型
-2. 从 PDF 提取文本
-3. 清洗文本噪音
-4. 压缩为一个 `MaterialSummary`
-5. 再把这个摘要对象交给 `task run`
-
-当前 `MaterialSummary` 至少包含：
-
-- `title`
-- `short_summary`
-- `key_topics`
-- `methods_or_entities`
-- `useful_snippets`
-- `relevance_to_project`
-- `raw_text_excerpt`
-
-这意味着：
-
-- 系统不再只是“读到了 PDF”
-- 而是会显式保存“它如何理解这个材料”
-
-## 当前材料层做了什么
-
-当前材料层已经做了：
-
-- txt / md / pdf 类型识别
-- PDF 文本提取
-- 基础文本清洗
-- 标题识别
-- 高频主题词抽取
-- 方法/实体关键词抽取
-- useful snippets 提取
-- 基于项目上下文的简单相关性判断
-- 将材料摘要落盘到项目目录
-
-## 当前材料层还没做什么
-
-当前还没有做：
-
-- OCR
+- OCR-only PDF
+- 联网检索
 - 复杂版面恢复
-- 学术论文章节级精确解析
-- 图表理解
-- 引文结构抽取
-- LLM 级别的深层语义理解
 
-也就是说，这一层现在是：
+## 当前支持两种智能模式
 
-> 一个规则驱动、可解释、足够支撑最小任务闭环的材料压缩层。
-
-## 当前借鉴了什么
-
-这一步我们只吸收了一个对 ClawLab 当前阶段真正有用的原则：
-
-> 学习结果必须是本地、可读、可编辑的资产文件。
-
-所以现在的资产不会只留在 JSON 里，也会额外落成 Markdown。
-
-我们没有引入额外的代理框架、训练系统或复杂运行时，因为这些都不服务于当前的最小闭环。
-
-## 当前支持两种运行模式
-
-### 1. Local base mode
+### Local base mode
 
 默认模式。
 
 特点：
 
 - 不需要 API key
-- 不需要联网
-- 使用规则驱动 / 模板驱动逻辑
-- 现有最小闭环完整可运行
+- 整条公司主链可运行
+- materials / planning / drafts / learning 全部使用规则版
 
-### 2. LLM enhanced mode
+### Hybrid intelligent mode
 
 可选增强模式。
 
-只有在你显式配置了 provider，并且设置了 API key 后，系统才会在少数模块上启用增强：
+你配置好 `OPENAI_API_KEY` 后，可以按模块开启增强：
 
-- materials
-- drafts
-- learning
-
-如果配置不完整，系统不会崩溃，而是自动回退到规则版。
-
-## 当前配置方式
-
-ClawLab 当前使用本地配置文件：
-
-- `clawlab.json`
-
-其中会保存：
-
-- `mode: local | hybrid`
-- `provider: none | openai`
-- `model`
 - `use_llm_for_materials`
+- `use_llm_for_planning`
 - `use_llm_for_drafts`
 - `use_llm_for_learning`
 
-默认就是：
-
-- `mode = local`
-- `provider = none`
-
-也就是默认完全不依赖 API。
-
-## 如何启用 LLM 增强
-
-第一步，设置环境变量：
-
-```bash
-export OPENAI_API_KEY=your_api_key_here
-```
-
-第二步，在 `clawlab.json` 里把配置改成类似：
+示例配置：
 
 ```json
 {
-  "workspace_root": "workspace",
-  "active_project_id": null,
   "llm": {
     "mode": "hybrid",
     "provider": "openai",
     "model": "gpt-4o-mini",
     "use_llm_for_materials": true,
+    "use_llm_for_planning": true,
     "use_llm_for_drafts": true,
-    "use_llm_for_learning": true,
-    "openai_base_url": "https://api.openai.com/v1"
+    "use_llm_for_learning": true
   }
 }
 ```
 
-## 如果不配置 API，哪些能力仍然可用
-
-全部最小闭环都仍然可用：
-
-- `init`
-- `ingest-cv`
-- `project create`
-- `task run`
-- `learn`
-- `status`
-
-也就是说：
-
-> API 不是必须的，只是质量增强选项。
-
-## 当前 LLM 支持的范围和边界
-
-当前只在 3 个模块上支持可选增强：
-
-- 材料理解
-- draft 生成
-- learning 总结
-
-当前不会把整个系统改成 LLM-first，也不会删除规则版逻辑。
-
-## Fallback 机制
-
-如果出现下面任一情况：
-
-- `mode = local`
-- `provider = none`
-- 相关模块的 LLM 开关关闭
-- `OPENAI_API_KEY` 缺失
-- provider 调用失败
-
-系统都会自动退回到当前的规则版逻辑。
-
-CLI 会尽量给出明确提示，而不是直接崩溃。
-
-## 你为什么会需要它
-
-如果你符合下面这些情况，ClawLab 就是为你准备的：
-
-- 你是研究生或博士生
-- 你已经有明确研究方向和项目
-- 你手头有 CV、文献、笔记、草稿、项目说明等材料
-- 你不想每次都从头向 AI 解释背景
-- 你希望系统能从你的修改中学习，而不是每次都失忆
-- 你希望这些内容沉淀在本地仓库里，而不是散落在聊天记录中
-
-## 快速开始
-
-### 1. 安装
-
-要求：
-
-- Python 3.11+
-- 系统中可用 `pdftotext`
-
-安装方式：
+环境变量：
 
 ```bash
-python3 -m pip install --user -e . --no-build-isolation
+export OPENAI_API_KEY=your_key_here
 ```
 
-如果你暂时不想安装命令，也可以直接运行：
+如果没配 key，ClawLab 不会崩，而是自动 fallback 到规则版。
 
-```bash
-python3 -m clawlab.cli.main --help
-```
+## 智能增强不是脱离公司协议工作的
 
-### 2. 初始化工作区
+这是当前设计里非常重要的一点。
 
-```bash
-clawlab init
-```
+ClawLab 的增强链路不会绕开公司系统，而是显式参考：
 
-### 3. 导入 CV
+- company handbook
+- employee playbook
+- relevant assets
+- recent handoff context
+- recent review history
+- `issue_type`
+- `intervention_policy`
 
-文本 CV：
+也就是说，岗位变聪明，不是因为它“自由发挥”，而是因为它开始站在现有公司的规则和历史之上工作。
 
-```bash
-clawlab ingest-cv examples/cv.txt
-```
-
-PDF CV：
-
-```bash
-clawlab ingest-cv examples/cv_sample.pdf
-```
-
-### 4. 创建项目
-
-```bash
-clawlab project create
-```
-
-### 5. 运行任务
-
-使用文本材料：
-
-```bash
-clawlab task run literature-outline --project <project_id> --input examples/task_input.txt
-```
-
-使用 PDF 材料：
-
-```bash
-clawlab task run paper-outline --project <project_id> --input examples/material_sample.pdf
-```
-
-### 6. 手动修改 draft 后学习
-
-```bash
-clawlab learn --task <task_id> --revised examples/revised_outline.md
-```
-
-### 7. 查看当前状态
-
-```bash
-clawlab status
-```
-
-## 一个完整示例
-
-最短路径就是：
-
-```bash
-clawlab init
-clawlab ingest-cv examples/cv.txt
-clawlab project create
-clawlab task run literature-outline --project <project_id> --input examples/task_input.txt
-clawlab learn --task <task_id> --revised examples/revised_outline.md
-clawlab status
-```
-
-如果你想直接测试 PDF 输入：
-
-```bash
-clawlab ingest-cv examples/cv_sample.pdf
-clawlab task run paper-outline --project <project_id> --input examples/material_sample.pdf
-```
-
-## 仓库结构
+## 工作区结构
 
 ```text
 clawlab/
   cli/
   core/
   services/
-  storage/
   prompts/
   templates/
   utils/
-examples/
 workspace/
+  profile/
+  projects/
+  assets/
+  tasks/
+  jobs/
+  company/
 tests/
-pyproject.toml
-README.md
+docs/
 ```
 
-### 结构说明
+其中：
 
-- `clawlab/`：核心代码
-- `workspace/`：本地研究工作区
-- `examples/`：最小样例输入输出
-- `tests/`：标准库 `unittest`
+- `clawlab/` 是系统代码
+- `workspace/` 是你的公司工作区
+- `docs/` 是当前架构与设计文档
+- `tests/` 是本地可运行的单元测试
 
-## 当前会沉淀什么
+## 当前核心对象
 
-ClawLab 当前会在本地仓库里沉淀这些核心对象：
+ClawLab 当前围绕这些对象工作：
 
 - `ResearcherProfile`
 - `ProjectCard`
 - `TaskCard`
-- `TaskPlan`
-- `MaterialSummary`
 - `ReusableAsset`
+- `MaterialSummary`
+- `TaskPlan`
+- `EmployeeSpec`
+- `Deliverable`
+- `WorkOrder`
+- `ManagerPlan`
+- `JobResult`
 
-这些对象共同构成你的最小研究工作上下文和经验层。
+上层公司语义还包括：
 
-## 当前不支持什么
+- `FounderProfile`
+- `CompanyProfile`
+- `TeamConfig`
 
-当前版本明确不支持：
+## 当前项目边界
 
-- OCR
-- DOCX / HTML 解析
+ClawLab 当前刻意不做这些事情：
+
 - 数据库
-- 联网检索
-- 多项目编排系统
 - 复杂 agent runtime
-- 自动执行代码或实验
-- embedding 检索
+- 自由多 agent 聊天
+- 并发调度
+- 联网搜索
+- OCR
+- 向量数据库
+- 多 provider 扩展
+- 复杂 UI / TUI
 
-因为当前优先级非常明确：
+因为当前优先级只有一个：
 
-> 先把 Python CLI-first 的最小研究协作闭环做稳。
+> 把“本地研究工作仓库 + 虚拟研究公司”这条主线做扎实。
 
-## 当前验证方式
+## 常用命令
 
-运行：
+### 公司视角
+
+```bash
+clawlab company init
+clawlab company status
+clawlab hire recommend
+clawlab team list
+clawlab employee brief <role>
+clawlab job run <job_type> --project <id> --input <path> --goal "..."
+clawlab handbook show
+```
+
+### 技术视角
+
+```bash
+clawlab init
+clawlab ingest-cv <path>
+clawlab project create
+clawlab task run <task_type> --project <id> --input <path>
+clawlab learn --task <task_id> --revised <path>
+clawlab status
+clawlab config show
+```
+
+## 文档导航
+
+- [当前工作流内核](docs/current-kernel.md)
+- [研究内核到公司模式的映射](docs/company-mapping.md)
+- [整体架构图](docs/architecture-diagram.md)
+- [员工层](docs/employees.md)
+- [经理层](docs/manager-layer.md)
+- [协作协议层](docs/collaboration-protocol.md)
+- [公司 onboarding](docs/company-onboarding.md)
+- [memory / training](docs/memory-and-training.md)
+- [intelligence modes](docs/intelligence-modes.md)
+
+## 当前最适合谁
+
+ClawLab 当前最适合：
+
+- 研究生 / 博士生
+- 有持续项目但知识容易散落的人
+- 希望把 AI 从“一次性回答器”变成“长期工作仓库”的人
+- 愿意用本地仓库管理研究流程的人
+
+如果你想要的是：
+
+- 直接联网替你搜论文
+- 一个成熟图形界面产品
+- 多人协作 SaaS
+
+那现在的 ClawLab 还不是这个阶段。
+
+## 开发与验证
+
+运行测试：
 
 ```bash
 python3 -m unittest discover -s tests
+python3 -m compileall clawlab
 ```
 
-## 下一步最关键的缺口
+## 最后一句话
 
-当前最关键的缺口不是“再加更多命令”，而是：
+ClawLab 现在最重要的，不是“更像一个 Agent”，而是：
 
-> 继续增强材料摘要规则，让长 PDF 的结构识别、主题抽取和 snippet 选择更稳。
-
-如果再往前走一步，才值得考虑在这个材料层之上接入 LLM 做更强的结构化理解。
+> 更像一家会记住经验、会积累 SOP、会逐步形成自己工作方式的虚拟研究公司。

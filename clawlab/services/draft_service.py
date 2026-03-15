@@ -5,6 +5,7 @@ from pathlib import Path
 from clawlab.core.constants import SUPPORTED_TASK_TYPES
 from clawlab.core.models import (
     LlmSettings,
+    ManagerPlan,
     MaterialSummary,
     ProjectCard,
     ResearcherProfile,
@@ -14,6 +15,12 @@ from clawlab.core.models import (
     utc_now,
 )
 from clawlab.prompts.drafts import build_draft_prompts
+from clawlab.services.context_service import (
+    get_company_handbook_context,
+    get_employee_playbook_context,
+    get_recent_protocol_context,
+    get_relevant_assets_context,
+)
 from clawlab.services.llm_service import call_llm, is_llm_enabled
 from clawlab.templates.drafts import render_literature_outline, render_paper_outline
 from clawlab.utils.ids import create_id
@@ -27,6 +34,7 @@ def generate_draft(
     material_summaries: list[MaterialSummary],
     retrieved_assets: list[ReusableAsset],
     task_plan: TaskPlan,
+    manager_plan: ManagerPlan | None = None,
     output_dir: Path,
     workspace_root: Path,
     llm_settings: LlmSettings | None = None,
@@ -47,6 +55,18 @@ def generate_draft(
     )
 
     draft_content: str | None = None
+    draft_used_llm = False
+    company_handbook_excerpt, company_sources = get_company_handbook_context()
+    playbook_excerpt, playbook_sources = get_employee_playbook_context("draft_writer")
+    protocol_excerpt, protocol_sources = get_recent_protocol_context(
+        project_id=project.id,
+        employee_role="draft_writer",
+    )
+    relevant_assets_excerpt, asset_sources, _ = get_relevant_assets_context(
+        project=project,
+        employee_role="draft_writer",
+    )
+    context_sources = company_sources + playbook_sources + protocol_sources + asset_sources
     if llm_settings and is_llm_enabled(llm_settings, "drafts"):
         try:
             system_prompt, user_prompt = build_draft_prompts(
@@ -54,14 +74,13 @@ def generate_draft(
                 profile=profile,
                 project=project,
                 material_summary=primary_material,
+                task_plan=task_plan,
+                manager_plan=manager_plan,
+                company_handbook_excerpt=company_handbook_excerpt,
+                employee_playbook_excerpt=playbook_excerpt,
+                relevant_assets_excerpt=relevant_assets_excerpt,
+                recent_protocol_excerpt=protocol_excerpt,
             )
-            if retrieved_assets:
-                user_prompt = (
-                    f"{user_prompt}\n\nRetrieved assets:\n"
-                    + "\n".join(f"- {asset.asset_type}: {asset.title} => {asset.content}" for asset in retrieved_assets[:4])
-                    + f"\n\nTask plan:\n- goal: {task_plan.task_goal}\n- strategy: {task_plan.output_strategy}\n"
-                    + "\n".join(f"- {point}" for point in task_plan.key_points_to_cover)
-                )
             draft_content = call_llm(
                 settings=llm_settings,
                 prompt=user_prompt,
@@ -69,8 +88,10 @@ def generate_draft(
                 temperature=0.25,
                 max_tokens=1400,
             )
+            draft_used_llm = True
         except Exception:
             draft_content = None
+            draft_used_llm = False
 
     if draft_content is None:
         if task_type == "literature-outline":
@@ -92,6 +113,8 @@ def generate_draft(
         material_summary_title=primary_material.title,
         material_summary_count=len(material_summaries),
         retrieved_asset_ids=[asset.id for asset in retrieved_assets],
+        draft_mode="llm" if draft_used_llm else "rule",
+        draft_context_sources=context_sources,
         expected_output=expected_output,
         generated_draft_path=str(draft_path.relative_to(workspace_root.parent)),
         revised_draft_path=None,

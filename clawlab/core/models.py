@@ -57,6 +57,8 @@ class TaskCard(BaseModel):
     material_summary_count: int = 0
     retrieved_asset_ids: list[str] = Field(default_factory=list)
     task_plan_path: str | None = None
+    draft_mode: Literal["rule", "llm"] = "rule"
+    draft_context_sources: list[str] = Field(default_factory=list)
     expected_output: str
     generated_draft_path: str
     revised_draft_path: str | None = None
@@ -67,14 +69,17 @@ class TaskCard(BaseModel):
 
 class ReusableAsset(BaseModel):
     id: str
-    scope: Literal["global", "project", "task"]
-    asset_type: Literal["writing_rule", "structure_template", "project_note"]
+    scope: Literal["company", "employee", "project", "task"]
+    asset_type: Literal["writing_rule", "structure_template", "project_note", "common_mistake", "sop_seed"]
     title: str
     content: str
     confidence: float
     source_task_id: str
     project_card_id: str | None = None
+    employee_role: EmployeeRole | None = None
     task_type: Literal["literature-outline", "paper-outline"] | None = None
+    derivation_mode: Literal["rule", "llm"] = "rule"
+    context_sources: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
 
@@ -84,6 +89,7 @@ class LlmSettings(BaseModel):
     provider: Literal["none", "openai"] = "none"
     model: str = "gpt-4o-mini"
     use_llm_for_materials: bool = False
+    use_llm_for_planning: bool = False
     use_llm_for_drafts: bool = False
     use_llm_for_learning: bool = False
     openai_base_url: str = "https://api.openai.com/v1"
@@ -119,6 +125,8 @@ class MaterialSummary(BaseModel):
     useful_snippets: list[str] = Field(default_factory=list)
     relevance_to_project: str
     raw_text_excerpt: str
+    generation_mode: Literal["rule", "llm"] = "rule"
+    context_sources: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now)
 
 
@@ -130,6 +138,8 @@ class TaskPlan(BaseModel):
     recommended_structure: list[str] = Field(default_factory=list)
     project_considerations: list[str] = Field(default_factory=list)
     selected_assets: list[str] = Field(default_factory=list)
+    planning_mode: Literal["rule", "llm"] = "rule"
+    context_sources: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now)
 
 
@@ -169,6 +179,46 @@ class Deliverable(BaseModel):
     created_at: str = Field(default_factory=utc_now)
 
 
+class Handoff(BaseModel):
+    id: str
+    from_role: EmployeeRole
+    to_role: EmployeeRole
+    source_deliverable_id: str
+    contract_type: Literal["material_brief", "planning_brief", "draft_review", "manager_recovery", "generic"] = "generic"
+    handoff_summary: str
+    payload: dict[str, object] = Field(default_factory=dict)
+    expected_use: str
+    status: Literal["created", "consumed"] = "created"
+    created_at: str = Field(default_factory=utc_now)
+
+
+class ReviewDecision(BaseModel):
+    id: str
+    reviewer_role: EmployeeRole
+    target_deliverable_id: str
+    decision: Literal["accept", "revise", "escalate"]
+    rationale: str
+    issue_type: Literal["none", "material_insufficiency", "structure_problem", "project_context_gap"] = "none"
+    risk_level: Literal["low", "medium", "high"] = "low"
+    review_checks: dict[str, str] = Field(default_factory=dict)
+    suggested_revisions: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utc_now)
+
+
+class ReassignmentAction(BaseModel):
+    id: str
+    job_id: str
+    manager_plan_id: str
+    original_work_order_id: str
+    reassigned_to: EmployeeRole
+    reason: str
+    trigger_review_decision_id: str | None = None
+    follow_up_work_order_id: str | None = None
+    intervention_policy: str | None = None
+    resolution_note: str | None = None
+    created_at: str = Field(default_factory=utc_now)
+
+
 class CompanyJob(BaseModel):
     id: str
     job_type: JobType
@@ -198,5 +248,38 @@ class JobResult(BaseModel):
     final_output_path: str
     participating_employees: list[EmployeeRole] = Field(default_factory=list)
     deliverable_ids: list[str] = Field(default_factory=list)
+    handoff_ids: list[str] = Field(default_factory=list)
+    review_decision_ids: list[str] = Field(default_factory=list)
+    reassignment_ids: list[str] = Field(default_factory=list)
+    final_status: Literal["accepted_directly", "revised_then_accepted", "escalated_with_risk"] = "accepted_directly"
     summary: str
+    created_at: str = Field(default_factory=utc_now)
+
+
+class FounderProfile(BaseModel):
+    id: str
+    researcher_profile_id: str
+    display_name: str
+    founder_title: str
+    founder_mission: str
+    created_at: str = Field(default_factory=utc_now)
+
+
+class CompanyProfile(BaseModel):
+    id: str
+    company_name: str
+    mission: str
+    focus_area: str
+    current_business_type: str
+    founder_profile_id: str
+    active_project_id: str | None = None
+    created_at: str = Field(default_factory=utc_now)
+
+
+class TeamConfig(BaseModel):
+    company_id: str
+    active_roles: list[EmployeeRole] = Field(default_factory=list)
+    role_descriptions: dict[str, str] = Field(default_factory=dict)
+    manager_enabled: bool = True
+    defaults: dict[str, str] = Field(default_factory=dict)
     created_at: str = Field(default_factory=utc_now)

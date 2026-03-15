@@ -2,8 +2,23 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from clawlab.core.models import LlmSettings, MaterialSummary, ProjectCard, ReusableAsset, TaskCard, TaskPlan
+from clawlab.core.models import (
+    LlmSettings,
+    MaterialSummary,
+    ProjectCard,
+    ReassignmentAction,
+    ReusableAsset,
+    ReviewDecision,
+    TaskCard,
+    TaskPlan,
+)
 from clawlab.services.asset_service import group_assets_by_scope, retrieve_assets_for_task, select_top_assets
+from clawlab.services.company_service import (
+    create_company_profile,
+    create_founder_profile,
+    create_team_config,
+    recommend_starter_team,
+)
 from clawlab.services.draft_service import generate_draft
 from clawlab.services.employee_service import get_employee_spec, list_employee_specs, run_employee_task
 from clawlab.services.ingest_service import read_cv_text
@@ -14,7 +29,26 @@ from clawlab.services.material_service import condense_material, detect_material
 from clawlab.services.planning_service import create_task_plan
 from clawlab.services.profile_service import parse_cv_to_profile
 from clawlab.services.project_service import create_project_from_answers, create_project_from_intake
-from clawlab.services.workspace_service import save_asset, save_project, save_project_asset
+from clawlab.services.workspace_service import (
+    load_company_job,
+    load_company_profile,
+    load_company_handbook,
+    load_founder_profile,
+    load_employee_playbook,
+    load_handoffs,
+    load_job_result,
+    load_manager_plan,
+    load_reassignment_actions,
+    load_review_decisions,
+    load_work_orders,
+    load_team_config,
+    save_asset,
+    save_company_profile,
+    save_founder_profile,
+    save_project,
+    save_project_asset,
+    save_team_config,
+)
 
 
 class ProfileServiceTests(unittest.TestCase):
@@ -93,6 +127,9 @@ Tools: Python, R, Git
         enabled, reason = get_llm_runtime_status(LlmSettings(), "materials")
         self.assertFalse(enabled)
         self.assertEqual(reason, "local mode enabled")
+        planning_enabled, planning_reason = get_llm_runtime_status(LlmSettings(), "planning")
+        self.assertFalse(planning_enabled)
+        self.assertEqual(planning_reason, "local mode enabled")
 
     def test_hybrid_mode_without_key_falls_back_cleanly(self) -> None:
         settings = LlmSettings(mode="hybrid", provider="openai", use_llm_for_materials=True)
@@ -119,6 +156,38 @@ Tools: Python, R, Git
         summary = condense_material(Path("examples/material_sample.pdf"), llm_settings=settings)
         self.assertEqual(summary.title, "LLM Material Title")
         self.assertEqual(summary.key_topics, ["glioma", "resistance"])
+        self.assertEqual(summary.generation_mode, "llm")
+
+    @patch("clawlab.services.material_service.get_recent_protocol_context", return_value=("issue_type=structure_problem", ["review:1"]))
+    @patch("clawlab.services.material_service.get_relevant_assets_context", return_value=("asset note", ["asset:1"], []))
+    @patch("clawlab.services.material_service.get_employee_playbook_context", return_value=("playbook rule", ["playbook.md"]))
+    @patch("clawlab.services.material_service.get_company_handbook_context", return_value=("handbook rule", ["handbook.md"]))
+    @patch("clawlab.services.material_service.is_llm_enabled", return_value=True)
+    @patch("clawlab.services.material_service.call_llm")
+    def test_materials_llm_prompt_includes_company_and_protocol_context(
+        self,
+        mock_call_llm,
+        _mock_enabled,
+        _mock_handbook,
+        _mock_playbook,
+        _mock_assets,
+        _mock_protocol,
+    ) -> None:
+        def _fake_call_llm(**kwargs):
+            prompt = kwargs["prompt"]
+            self.assertIn("Company handbook excerpt", prompt)
+            self.assertIn("handbook rule", prompt)
+            self.assertIn("Employee playbook excerpt", prompt)
+            self.assertIn("playbook rule", prompt)
+            self.assertIn("issue_type=structure_problem", prompt)
+            return """{"title":"t","short_summary":"s","key_topics":["a"],"methods_or_entities":["b"],"useful_snippets":["c"],"relevance_to_project":"r","raw_text_excerpt":"x"}"""
+
+        mock_call_llm.side_effect = _fake_call_llm
+        summary = condense_material(
+            Path("examples/material_sample.pdf"),
+            llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_materials=True),
+        )
+        self.assertIn("handbook.md", summary.context_sources)
 
     @patch("clawlab.services.material_service.call_llm", side_effect=AssertionError("LLM should not be called"))
     def test_materials_config_off_stays_rule_based(self, _mock_call_llm) -> None:
@@ -192,7 +261,7 @@ Tools: Python, R, Git
         retrieved_assets = [
             ReusableAsset(
                 id="asset_rule_demo",
-                scope="global",
+                scope="company",
                 asset_type="writing_rule",
                 title="Claim-first writing",
                 content="Open each section with a project-specific claim.",
@@ -259,12 +328,98 @@ Tools: Python, R, Git
         )
         self.assertIn("LLM Draft", draft_path.read_text(encoding="utf-8"))
 
+    @patch("clawlab.services.planning_service.get_recent_protocol_context", return_value=("issue_type=project_context_gap\npolicy=clarify_project_context", ["review:1", "reassign:1"]))
+    @patch("clawlab.services.planning_service.get_employee_playbook_context", return_value=("project manager playbook", ["pm.md"]))
+    @patch("clawlab.services.planning_service.get_company_handbook_context", return_value=("company handbook", ["company.md"]))
+    @patch("clawlab.services.planning_service.is_llm_enabled", return_value=True)
+    @patch("clawlab.services.planning_service.call_llm")
+    def test_planning_llm_branch_returns_structured_plan_and_includes_protocol_context(
+        self,
+        mock_call_llm,
+        _mock_enabled,
+        _mock_handbook,
+        _mock_playbook,
+        _mock_protocol,
+    ) -> None:
+        profile, project, material_summary = self._build_profile_project_material()
+
+        def _fake_call_llm(**kwargs):
+            prompt = kwargs["prompt"]
+            self.assertIn("Company handbook excerpt", prompt)
+            self.assertIn("project manager playbook", prompt)
+            self.assertIn("issue_type=project_context_gap", prompt)
+            self.assertIn("policy=clarify_project_context", prompt)
+            return """{
+              "task_goal":"Sharper paper plan",
+              "output_strategy":"paper_storyline",
+              "key_points_to_cover":["Problem framing","Gap logic"],
+              "recommended_structure":["Intro","Gap","Evidence","Next move"],
+              "project_considerations":["Address project context gap."],
+              "selected_assets":["writing_rule: claim first"]
+            }"""
+
+        mock_call_llm.side_effect = _fake_call_llm
+        plan = create_task_plan(
+            task_type="paper-outline",
+            profile=profile,
+            project=project,
+            material_summaries=[material_summary],
+            retrieved_assets=[],
+            llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_planning=True),
+        )
+        self.assertEqual(plan.planning_mode, "llm")
+        self.assertIn("company.md", plan.context_sources)
+        self.assertEqual(plan.output_strategy, "paper_storyline")
+
+    @patch("clawlab.services.draft_service.get_recent_protocol_context", return_value=("issue_type=structure_problem\nsuggested_revisions=clarify gap", ["review:2"]))
+    @patch("clawlab.services.draft_service.get_relevant_assets_context", return_value=("asset excerpt", ["asset:1"], []))
+    @patch("clawlab.services.draft_service.get_employee_playbook_context", return_value=("draft playbook", ["draft.md"]))
+    @patch("clawlab.services.draft_service.get_company_handbook_context", return_value=("handbook excerpt", ["company.md"]))
+    @patch("clawlab.services.draft_service.is_llm_enabled", return_value=True)
+    @patch("clawlab.services.draft_service.call_llm", return_value="# LLM Draft\n\n## Gap\n- revised with protocol context")
+    def test_draft_llm_prompt_includes_playbook_and_review_history(
+        self,
+        mock_call_llm,
+        _mock_enabled,
+        _mock_handbook,
+        _mock_playbook,
+        _mock_assets,
+        _mock_protocol,
+    ) -> None:
+        profile, project, material_summary = self._build_profile_project_material()
+        output_dir = Path("workspace/projects/test_project/outputs")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        task, draft_path = generate_draft(
+            profile,
+            project,
+            task_type="paper-outline",
+            material_summaries=[material_summary],
+            retrieved_assets=[],
+            task_plan=TaskPlan(
+                task_type="paper-outline",
+                task_goal="Plan a paper",
+                output_strategy="paper_storyline",
+                key_points_to_cover=["Gap"],
+                recommended_structure=["Intro", "Gap"],
+                project_considerations=["Clarify project context"],
+                selected_assets=[],
+            ),
+            output_dir=output_dir,
+            workspace_root=Path("workspace"),
+            llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_drafts=True),
+        )
+        self.assertIn("LLM Draft", draft_path.read_text(encoding="utf-8"))
+        prompt = mock_call_llm.call_args.kwargs["prompt"]
+        self.assertIn("draft playbook", prompt)
+        self.assertIn("issue_type=structure_problem", prompt)
+        self.assertEqual(task.draft_mode, "llm")
+
     def test_asset_retrieval_and_grouping_returns_relevant_subset(self) -> None:
         profile, project, material_summary = self._build_profile_project_material()
         assets = [
             ReusableAsset(
                 id="asset_global_rule",
-                scope="global",
+                scope="company",
                 asset_type="writing_rule",
                 title="Glioma claim-first",
                 content="State the glioma resistance claim before evidence.",
@@ -286,7 +441,7 @@ Tools: Python, R, Git
             ),
             ReusableAsset(
                 id="asset_unrelated",
-                scope="global",
+                scope="company",
                 asset_type="structure_template",
                 title="Traffic forecasting template",
                 content="Use temporal graph forecasting sections.",
@@ -297,7 +452,7 @@ Tools: Python, R, Git
             ),
         ]
         grouped = group_assets_by_scope(assets)
-        self.assertEqual(len(grouped["global"]), 2)
+        self.assertEqual(len(grouped["company"]), 2)
         retrieved = retrieve_assets_for_task(
             task_type="literature-outline",
             project=project,
@@ -325,7 +480,7 @@ Tools: Python, R, Git
             ),
             ReusableAsset(
                 id="a2",
-                scope="global",
+                scope="company",
                 asset_type="writing_rule",
                 title="Claim first",
                 content="Lead with the claim.",
@@ -369,6 +524,47 @@ Tools: Python, R, Git
         self.assertTrue(paper_plan.recommended_structure)
         self.assertTrue(any("materials" in point.lower() for point in literature_plan.key_points_to_cover))
 
+    @patch("clawlab.services.planning_service.call_llm", side_effect=AssertionError("LLM should not be called"))
+    def test_planning_config_off_stays_rule_based(self, _mock_call_llm) -> None:
+        profile, project, material_summary = self._build_profile_project_material()
+        plan = create_task_plan(
+            task_type="literature-outline",
+            profile=profile,
+            project=project,
+            material_summaries=[material_summary],
+            retrieved_assets=[],
+            llm_settings=LlmSettings(mode="local", provider="none", use_llm_for_planning=False),
+        )
+        self.assertEqual(plan.planning_mode, "rule")
+
+    @patch("clawlab.services.draft_service.call_llm", side_effect=AssertionError("LLM should not be called"))
+    def test_draft_hybrid_without_key_falls_back_to_rule_mode(self, _mock_call_llm) -> None:
+        profile, project, material_summary = self._build_profile_project_material()
+        output_dir = Path("workspace/projects/test_project/outputs")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with patch.dict("os.environ", {}, clear=False):
+            task, draft_path = generate_draft(
+                profile,
+                project,
+                task_type="literature-outline",
+                material_summaries=[material_summary],
+                retrieved_assets=[],
+                task_plan=TaskPlan(
+                    task_type="literature-outline",
+                    task_goal="Prepare a literature outline",
+                    output_strategy="background_review",
+                    key_points_to_cover=["Context"],
+                    recommended_structure=["Context", "Gap"],
+                    project_considerations=["Avoid generic framing."],
+                    selected_assets=[],
+                ),
+                output_dir=output_dir,
+                workspace_root=Path("workspace"),
+                llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_drafts=True),
+            )
+        self.assertEqual(task.draft_mode, "rule")
+        self.assertTrue(draft_path.exists())
+
 
 class LearningServiceTests(unittest.TestCase):
     def test_derive_assets_from_revision_returns_expected_asset_types(self) -> None:
@@ -408,13 +604,14 @@ Tools: Python, LaTeX
         self.assertTrue(updated_project.next_step)
         self.assertEqual(
             {asset.asset_type for asset in assets},
-            {"writing_rule", "structure_template", "project_note"},
+            {"writing_rule", "structure_template", "project_note", "common_mistake", "sop_seed"},
         )
-        self.assertIn("global", {asset.scope for asset in assets})
+        self.assertIn("company", {asset.scope for asset in assets})
+        self.assertIn("employee", {asset.scope for asset in assets})
         self.assertIn("project", {asset.scope for asset in assets})
-        self.assertIn("task", {asset.scope for asset in assets})
         self.assertIn("Signals:", updated_task.feedback_summary)
-        self.assertIn("Observed revision signals", assets[-1].content)
+        project_note = next(asset for asset in assets if asset.asset_type == "project_note")
+        self.assertIn("Observed revision signals", project_note.content)
 
     @patch("clawlab.services.learning_service.is_llm_enabled", return_value=True)
     @patch("clawlab.services.learning_service.call_llm")
@@ -422,7 +619,8 @@ Tools: Python, LaTeX
         mock_call_llm.return_value = """{
           "writing_rules": ["Prefer explicit gap statements."],
           "structure_template": "Use context, gap, evidence, next move.",
-          "project_note": "User prefers tighter logic around blocker resolution."
+          "project_note": "User prefers tighter logic around blocker resolution.",
+          "role_memory": "Review editor should flag project-context gaps earlier."
         }"""
         profile = parse_cv_to_profile("Li Wei\nPhD Candidate in Computational Biology")
         project = create_project_from_answers(
@@ -451,6 +649,57 @@ Tools: Python, LaTeX
             llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_learning=True),
         )
         self.assertEqual(assets[0].content, "Prefer explicit gap statements.")
+        self.assertTrue(any(asset.employee_role == "review_editor" for asset in assets))
+
+    @patch("clawlab.services.learning_service.get_recent_protocol_context", return_value=("issue_type=material_insufficiency\npolicy=recover_material_grounding", ["review:3", "reassign:3"]))
+    @patch("clawlab.services.learning_service.get_employee_playbook_context", return_value=("review editor playbook", ["review.md"]))
+    @patch("clawlab.services.learning_service.get_company_handbook_context", return_value=("company handbook", ["company.md"]))
+    @patch("clawlab.services.learning_service.is_llm_enabled", return_value=True)
+    @patch("clawlab.services.learning_service.call_llm")
+    def test_learning_llm_prompt_includes_handbook_and_intervention_history(
+        self,
+        mock_call_llm,
+        _mock_enabled,
+        _mock_handbook,
+        _mock_playbook,
+        _mock_protocol,
+    ) -> None:
+        mock_call_llm.return_value = """{
+          "writing_rules": ["Cut generic background."],
+          "structure_template": "Context, evidence, gap, next move.",
+          "project_note": "Material grounding should be checked earlier.",
+          "role_memory": "When material insufficiency appears twice, escalate faster."
+        }"""
+        profile = parse_cv_to_profile("Li Wei\nPhD Candidate in Computational Biology")
+        project = create_project_from_answers(
+            profile,
+            title="Test project",
+            desired_outcome="Prepare an outline",
+            blocker="Scattered notes",
+            materials="Paper notes; memo",
+        )
+        task = TaskCard(
+            id="task_demo",
+            project_card_id=project.id,
+            task_type="literature-outline",
+            input_summary="Outline the literature",
+            input_materials=["Paper notes", "Memo"],
+            input_material_paths=["examples/task_input.txt"],
+            input_material_types=["txt"],
+            expected_output="Markdown outline",
+            generated_draft_path="workspace/projects/test/outputs/demo.md",
+        )
+        _, _, assets = derive_assets_from_revision(
+            task,
+            project,
+            generated_text="# Draft\n- broad framing\n",
+            revised_text="# Draft\n## Evidence\n- tighter framing\n",
+            llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_learning=True),
+        )
+        prompt = mock_call_llm.call_args.kwargs["prompt"]
+        self.assertIn("review editor playbook", prompt)
+        self.assertIn("policy=recover_material_grounding", prompt)
+        self.assertTrue(any("company.md" in asset.context_sources for asset in assets))
 
     def test_task_plan_carries_selected_assets(self) -> None:
         profile = parse_cv_to_profile(
@@ -481,7 +730,7 @@ Tools: Python, LaTeX
         assets = [
             ReusableAsset(
                 id="asset_rule_demo",
-                scope="global",
+                scope="company",
                 asset_type="writing_rule",
                 title="Claim-first writing",
                 content="Open each section with a project-specific claim.",
@@ -541,9 +790,46 @@ Tools: Python, LaTeX
             self.assertTrue(project_json_path.exists())
 
         self.assertTrue(Path(f"workspace/assets/writing-rules/{assets[0].id}.md").exists())
-        self.assertTrue(Path(f"workspace/assets/templates/{assets[-2].id}.md").exists())
-        self.assertTrue(Path(f"workspace/assets/project-notes/{assets[-1].id}.md").exists())
-        self.assertTrue(Path(f"workspace/projects/{project.id}/notes/{assets[-1].id}.md").exists())
+        project_note = next(asset for asset in assets if asset.asset_type == "project_note")
+        structure_template = next(asset for asset in assets if asset.asset_type == "structure_template")
+        self.assertTrue(Path(f"workspace/assets/templates/{structure_template.id}.md").exists())
+        self.assertTrue(Path(f"workspace/assets/project-notes/{project_note.id}.md").exists())
+        self.assertTrue(Path(f"workspace/projects/{project.id}/notes/{project_note.id}.md").exists())
+        self.assertTrue(load_company_handbook())
+        self.assertTrue(load_employee_playbook("draft_writer"))
+
+    @patch("clawlab.services.learning_service.call_llm", side_effect=AssertionError("LLM should not be called"))
+    def test_learning_hybrid_without_key_falls_back_cleanly(self, _mock_call_llm) -> None:
+        profile = parse_cv_to_profile("Li Wei\nPhD Candidate in Computational Biology")
+        project = create_project_from_answers(
+            profile,
+            title="Test project",
+            desired_outcome="Prepare an outline",
+            blocker="Scattered notes",
+            materials="Paper notes; memo",
+        )
+        task = TaskCard(
+            id="task_demo_fallback",
+            project_card_id=project.id,
+            task_type="literature-outline",
+            input_summary="Outline the literature",
+            input_materials=["Paper notes"],
+            input_material_paths=["examples/task_input.txt"],
+            input_material_types=["txt"],
+            expected_output="Markdown outline",
+            generated_draft_path="workspace/projects/test/outputs/demo.md",
+        )
+        with patch.dict("os.environ", {}, clear=False):
+            updated_task, _, assets = derive_assets_from_revision(
+                task,
+                project,
+                generated_text="# Draft\n- broad framing\n",
+                revised_text="# Draft\n## Evidence\n- tighter framing\n",
+                llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_learning=True),
+            )
+        self.assertTrue(updated_task.feedback_summary)
+        self.assertTrue(assets)
+        self.assertTrue(all(asset.derivation_mode in {"rule", "llm"} for asset in assets))
 
 
 class EmployeeServiceTests(unittest.TestCase):
@@ -650,7 +936,39 @@ Tools: Python, R, Git
         self.assertTrue(plan.selected_employees)
         self.assertEqual(plan.work_order_sequence, [work_order.id for work_order in work_orders])
         self.assertEqual(work_orders[0].employee_role, "literature_analyst")
-        self.assertEqual(work_orders[-1].employee_role, "draft_writer")
+        self.assertEqual(work_orders[-1].employee_role, "review_editor")
+
+    @patch("clawlab.services.manager_service.get_recent_protocol_context", return_value=("issue_type=structure_problem\npolicy=repair_structure_plan", ["review:1", "reassign:1"]))
+    @patch("clawlab.services.manager_service.get_employee_playbook_context", return_value=("pm playbook", ["pm.md"]))
+    @patch("clawlab.services.manager_service.get_company_handbook_context", return_value=("company handbook", ["company.md"]))
+    @patch("clawlab.services.manager_service.is_llm_enabled", return_value=True)
+    @patch("clawlab.services.manager_service.call_llm")
+    def test_manager_plan_llm_branch_uses_protocol_context(
+        self,
+        mock_call_llm,
+        _mock_enabled,
+        _mock_handbook,
+        _mock_playbook,
+        _mock_protocol,
+    ) -> None:
+        profile, project = self._build_profile_and_project()
+        mock_call_llm.return_value = """{
+          "selected_employees":["project_manager","draft_writer","review_editor"],
+          "expected_deliverables":["Task plan","Draft markdown","Review report"],
+          "final_output_strategy":"Use a structure-first recovery strategy."
+        }"""
+        _job, plan, work_orders = create_manager_plan(
+            job_type="paper-outline",
+            boss_goal="Produce a paper outline for the active project.",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+            profile=profile,
+            llm_settings=LlmSettings(mode="hybrid", provider="openai", use_llm_for_planning=True),
+        )
+        prompt = mock_call_llm.call_args.kwargs["prompt"]
+        self.assertIn("policy=repair_structure_plan", prompt)
+        self.assertEqual(plan.selected_employees[-1], "review_editor")
+        self.assertEqual(work_orders[0].employee_role, "project_manager")
 
     def test_manager_dispatch_and_result_produce_traceable_outputs(self) -> None:
         profile, project = self._build_profile_and_project()
@@ -660,18 +978,240 @@ Tools: Python, R, Git
             project=project,
             input_path=Path("examples/task_input.txt"),
         )
-        deliverables = dispatch_work_orders(
+        deliverables, handoffs, review_decisions, reassignments, final_status = dispatch_work_orders(
             job=job,
             plan=plan,
             work_orders=work_orders,
             profile=profile,
             project=project,
         )
-        result = synthesize_job_result(job=job, plan=plan, deliverables=deliverables)
+        result = synthesize_job_result(
+            job=job,
+            plan=plan,
+            deliverables=deliverables,
+            handoffs=handoffs,
+            review_decisions=review_decisions,
+            reassignments=reassignments,
+            final_status=final_status,
+        )
         self.assertTrue(deliverables)
         self.assertTrue(Path(result.final_output_path).exists())
         self.assertIn("project_manager", result.participating_employees)
         self.assertEqual(len(result.deliverable_ids), len(deliverables))
+        self.assertTrue(handoffs)
+        self.assertTrue(review_decisions)
+        self.assertEqual(result.handoff_ids, [handoff.id for handoff in handoffs])
+        self.assertEqual(result.review_decision_ids, [review.id for review in review_decisions])
+        self.assertEqual(result.final_status, final_status)
+
+    def test_handoffs_are_created_with_structured_content(self) -> None:
+        profile, project = self._build_profile_and_project()
+        job, plan, work_orders = create_manager_plan(
+            job_type="literature-brief",
+            boss_goal="Produce a concise literature brief for the active project.",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+        )
+        _, handoffs, _, _, _ = dispatch_work_orders(
+            job=job,
+            plan=plan,
+            work_orders=work_orders,
+            profile=profile,
+            project=project,
+        )
+        self.assertGreaterEqual(len(handoffs), 3)
+        first_handoff = handoffs[0]
+        self.assertEqual(first_handoff.from_role, "literature_analyst")
+        self.assertEqual(first_handoff.contract_type, "material_brief")
+        self.assertIn("Key topics", first_handoff.handoff_summary)
+        self.assertIn("key_topics", first_handoff.payload)
+        self.assertIn("Use the material summary", first_handoff.expected_use)
+        self.assertIn("consumed", {handoff.status for handoff in handoffs})
+        self.assertTrue(load_handoffs(job.id))
+
+    def test_review_revise_retries_only_once(self) -> None:
+        profile, project = self._build_profile_and_project()
+        job, plan, work_orders = create_manager_plan(
+            job_type="paper-outline",
+            boss_goal="Produce a paper outline for the active project.",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+        )
+        review_sequence = [
+            ReviewDecision(
+                id="review_first",
+                reviewer_role="review_editor",
+                target_deliverable_id="deliverable_initial",
+                decision="revise",
+                rationale="Need clearer hierarchy.",
+                issue_type="structure_problem",
+                risk_level="medium",
+                review_checks={
+                    "material_grounding": "pass",
+                    "structure_clarity": "revise",
+                    "gap_explicitness": "pass",
+                },
+                suggested_revisions=["Add section hierarchy.", "State the gap explicitly."],
+            ),
+            ReviewDecision(
+                id="review_second",
+                reviewer_role="review_editor",
+                target_deliverable_id="deliverable_retry",
+                decision="accept",
+                rationale="The revised draft is acceptable.",
+                issue_type="none",
+                risk_level="low",
+                review_checks={
+                    "material_grounding": "pass",
+                    "structure_clarity": "pass",
+                    "gap_explicitness": "pass",
+                },
+                suggested_revisions=[],
+            ),
+        ]
+        with patch("clawlab.services.manager_service._create_review_decision", side_effect=review_sequence):
+            deliverables, handoffs, reviews, reassignments, final_status = dispatch_work_orders(
+                job=job,
+                plan=plan,
+                work_orders=work_orders,
+                profile=profile,
+                project=project,
+            )
+        self.assertEqual(final_status, "revised_then_accepted")
+        self.assertEqual([review.decision for review in reviews], ["revise", "accept"])
+        self.assertEqual(reviews[0].issue_type, "structure_problem")
+        self.assertEqual(reviews[0].risk_level, "medium")
+        self.assertEqual(reviews[0].review_checks["structure_clarity"], "revise")
+        draft_writer_orders = [order for order in load_work_orders(job.id) if order.employee_role == "draft_writer"]
+        self.assertEqual(len(draft_writer_orders), 2)
+        self.assertFalse(reassignments)
+        self.assertGreaterEqual(len(handoffs), 4)
+        self.assertTrue(any(deliverable.employee_role == "review_editor" for deliverable in deliverables))
+
+    def test_review_escalate_creates_single_reassignment(self) -> None:
+        profile, project = self._build_profile_and_project()
+        job, plan, work_orders = create_manager_plan(
+            job_type="literature-brief",
+            boss_goal="Produce a concise literature brief for the active project.",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+        )
+        review_sequence = [
+            ReviewDecision(
+                id="review_escalate",
+                reviewer_role="review_editor",
+                target_deliverable_id="deliverable_initial",
+                decision="escalate",
+                rationale="Material grounding is insufficient for the draft.",
+                issue_type="material_insufficiency",
+                risk_level="high",
+                review_checks={
+                    "material_grounding": "fail",
+                    "structure_clarity": "pass",
+                    "gap_explicitness": "pass",
+                },
+                suggested_revisions=["Add stronger evidence from the material summary."],
+            )
+        ]
+        with patch("clawlab.services.manager_service._create_review_decision", side_effect=review_sequence):
+            _, handoffs, reviews, reassignments, final_status = dispatch_work_orders(
+                job=job,
+                plan=plan,
+                work_orders=work_orders,
+                profile=profile,
+                project=project,
+            )
+        self.assertEqual(final_status, "escalated_with_risk")
+        self.assertEqual([review.decision for review in reviews], ["escalate"])
+        self.assertEqual(reviews[0].issue_type, "material_insufficiency")
+        self.assertEqual(reviews[0].risk_level, "high")
+        self.assertEqual(reviews[0].review_checks["material_grounding"], "fail")
+        self.assertEqual(len(reassignments), 1)
+        self.assertEqual(reassignments[0].reassigned_to, "literature_analyst")
+        self.assertEqual(reassignments[0].trigger_review_decision_id, "review_escalate")
+        self.assertIsNotNone(reassignments[0].follow_up_work_order_id)
+        self.assertEqual(reassignments[0].intervention_policy, "recover_material_grounding")
+        self.assertIn("stronger evidence extraction", reassignments[0].resolution_note or "")
+        self.assertTrue(load_reassignment_actions(job.id))
+        self.assertGreaterEqual(len(handoffs), 4)
+
+    def test_job_result_and_saved_trace_capture_collaboration_protocol(self) -> None:
+        profile, project = self._build_profile_and_project()
+        job, plan, work_orders = create_manager_plan(
+            job_type="project-brief",
+            boss_goal="Produce a project brief for the active project.",
+            project=project,
+            input_path=Path("examples/project_brief.md"),
+        )
+        deliverables, handoffs, reviews, reassignments, final_status = dispatch_work_orders(
+            job=job,
+            plan=plan,
+            work_orders=work_orders,
+            profile=profile,
+            project=project,
+        )
+        result = synthesize_job_result(
+            job=job,
+            plan=plan,
+            deliverables=deliverables,
+            handoffs=handoffs,
+            review_decisions=reviews,
+            reassignments=reassignments,
+            final_status=final_status,
+        )
+        self.assertIsNotNone(load_company_job(job.id))
+        self.assertIsNotNone(load_manager_plan(Path(f"workspace/jobs/{job.id}/manager_plan.json")))
+        self.assertIsNotNone(load_job_result(Path(f"workspace/jobs/{job.id}/job_result.json")))
+        self.assertIn(result.final_status, {"accepted_directly", "revised_then_accepted", "escalated_with_risk"})
+        self.assertTrue(load_handoffs(job.id))
+        self.assertTrue(load_review_decisions(job.id))
+
+
+class CompanyServiceTests(unittest.TestCase):
+    def test_company_onboarding_models_map_from_researcher_profile(self) -> None:
+        profile = parse_cv_to_profile(
+            """Li Wei
+PhD Candidate in Computational Biology
+Methods: differential expression, literature synthesis
+Tools: Python, R, Git
+"""
+        )
+        founder = create_founder_profile(
+            profile,
+            founder_mission="Build a virtual research company that helps me turn ideas into reusable outputs.",
+        )
+        company = create_company_profile(
+            company_name="Wei Research Studio",
+            mission=founder.founder_mission,
+            focus_area=profile.discipline,
+            current_business_type="Single-founder research company",
+            founder_profile_id=founder.id,
+        )
+        team = create_team_config(
+            company_id=company.id,
+            active_roles=recommend_starter_team(profile),
+        )
+        self.assertEqual(founder.researcher_profile_id, profile.id)
+        self.assertEqual(company.founder_profile_id, founder.id)
+        self.assertIn("draft_writer", team.active_roles)
+
+    def test_company_profiles_can_be_saved_and_loaded(self) -> None:
+        profile = parse_cv_to_profile("Li Wei\nPhD Candidate in Computational Biology")
+        founder = create_founder_profile(profile, founder_mission="Build a small research company.")
+        company = create_company_profile(
+            company_name="ClawLab Demo Co.",
+            mission="Build a small research company.",
+            focus_area="Computational Biology",
+            current_business_type="Single-founder research company",
+            founder_profile_id=founder.id,
+        )
+        team = create_team_config(company_id=company.id, active_roles=["project_manager", "draft_writer"])
+        save_founder_profile(founder)
+        save_company_profile(company)
+        save_team_config(team)
+        self.assertEqual(load_founder_profile().id, founder.id)
+        self.assertEqual(load_company_profile().company_name, "ClawLab Demo Co.")
+        self.assertEqual(load_team_config().active_roles, ["project_manager", "draft_writer"])
 
 
 if __name__ == "__main__":

@@ -13,7 +13,10 @@ from clawlab.core.constants import (
 )
 from clawlab.core.models import (
     CompanyJob,
+    CompanyProfile,
     Deliverable,
+    FounderProfile,
+    Handoff,
     JobResult,
     ManagerPlan,
     MaterialSummary,
@@ -22,6 +25,9 @@ from clawlab.core.models import (
     ReusableAsset,
     TaskCard,
     TaskPlan,
+    TeamConfig,
+    ReassignmentAction,
+    ReviewDecision,
     WorkOrder,
     WorkspaceConfig,
     WorkspaceState,
@@ -33,6 +39,8 @@ ASSET_MARKDOWN_DIRS = {
     "writing_rule": "writing-rules",
     "structure_template": "templates",
     "project_note": "project-notes",
+    "common_mistake": "common-mistakes",
+    "sop_seed": "sop-seeds",
 }
 
 
@@ -70,8 +78,12 @@ def init_workspace(repo_root: Path | None = None) -> WorkspaceConfig:
     ensure_directory(workspace_root / "assets")
     ensure_directory(workspace_root / "tasks")
     ensure_directory(workspace_root / "jobs")
+    ensure_directory(workspace_root / "company")
+    ensure_directory(get_company_handbook_root(repo_root))
+    ensure_directory(get_employee_playbooks_root(repo_root))
     for directory in ASSET_MARKDOWN_DIRS.values():
         ensure_directory(workspace_root / "assets" / directory)
+        ensure_directory(get_company_handbook_root(repo_root) / directory)
 
     config = WorkspaceConfig(workspace_root=str(workspace_root.relative_to(repo_root or get_repo_root())))
     save_config(config, repo_root)
@@ -82,6 +94,22 @@ def init_workspace(repo_root: Path | None = None) -> WorkspaceConfig:
 
 def get_profile_path(repo_root: Path | None = None) -> Path:
     return get_workspace_root(repo_root) / "profile" / PROFILE_FILENAME
+
+
+def get_company_root(repo_root: Path | None = None) -> Path:
+    return get_workspace_root(repo_root) / "company"
+
+
+def get_founder_profile_path(repo_root: Path | None = None) -> Path:
+    return get_company_root(repo_root) / "founder_profile.json"
+
+
+def get_company_profile_path(repo_root: Path | None = None) -> Path:
+    return get_company_root(repo_root) / "company_profile.json"
+
+
+def get_team_config_path(repo_root: Path | None = None) -> Path:
+    return get_company_root(repo_root) / "team_config.json"
 
 
 def get_projects_root(repo_root: Path | None = None) -> Path:
@@ -152,6 +180,30 @@ def get_job_result_path(job_id: str, repo_root: Path | None = None) -> Path:
     return get_job_dir(job_id, repo_root) / "job_result.json"
 
 
+def get_handoffs_dir(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "handoffs"
+
+
+def get_handoff_path(job_id: str, handoff_id: str, repo_root: Path | None = None) -> Path:
+    return get_handoffs_dir(job_id, repo_root) / f"{handoff_id}.json"
+
+
+def get_reviews_dir(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "reviews"
+
+
+def get_review_path(job_id: str, review_id: str, repo_root: Path | None = None) -> Path:
+    return get_reviews_dir(job_id, repo_root) / f"{review_id}.json"
+
+
+def get_reassignments_dir(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "reassignments"
+
+
+def get_reassignment_path(job_id: str, reassignment_id: str, repo_root: Path | None = None) -> Path:
+    return get_reassignments_dir(job_id, repo_root) / f"{reassignment_id}.json"
+
+
 def get_task_path(task_id: str, repo_root: Path | None = None) -> Path:
     return get_tasks_root(repo_root) / task_id / TASK_FILENAME
 
@@ -164,6 +216,18 @@ def get_assets_root(repo_root: Path | None = None) -> Path:
     return get_workspace_root(repo_root) / "assets"
 
 
+def get_company_handbook_root(repo_root: Path | None = None) -> Path:
+    return get_company_root(repo_root) / "handbook"
+
+
+def get_employee_playbooks_root(repo_root: Path | None = None) -> Path:
+    return get_company_root(repo_root) / "employee_playbooks"
+
+
+def get_employee_playbook_dir(employee_role: str, repo_root: Path | None = None) -> Path:
+    return get_employee_playbooks_root(repo_root) / employee_role
+
+
 def get_asset_path(asset_id: str, repo_root: Path | None = None) -> Path:
     return get_assets_root(repo_root) / f"{asset_id}.json"
 
@@ -171,6 +235,18 @@ def get_asset_path(asset_id: str, repo_root: Path | None = None) -> Path:
 def get_asset_markdown_path(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
     directory = ASSET_MARKDOWN_DIRS[asset.asset_type]
     return get_assets_root(repo_root) / directory / f"{asset.id}.md"
+
+
+def get_company_handbook_asset_path(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
+    directory = ASSET_MARKDOWN_DIRS[asset.asset_type]
+    return get_company_handbook_root(repo_root) / directory / f"{asset.id}.md"
+
+
+def get_employee_playbook_asset_path(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
+    if not asset.employee_role:
+        raise ValueError("employee-scoped asset requires employee_role")
+    directory = ASSET_MARKDOWN_DIRS[asset.asset_type]
+    return get_employee_playbook_dir(asset.employee_role, repo_root) / directory / f"{asset.id}.md"
 
 
 def get_project_notes_dir(project_id: str, repo_root: Path | None = None) -> Path:
@@ -192,6 +268,7 @@ def _render_asset_markdown(asset: ReusableAsset) -> str:
             f"- scope: {asset.scope}",
             f"- confidence: {asset.confidence:.2f}",
             f"- source_task_id: {asset.source_task_id}",
+            f"- employee_role: {asset.employee_role or 'n/a'}",
             f"- created_at: {asset.created_at}",
             "",
             "## Content",
@@ -205,6 +282,45 @@ def save_profile(profile: ResearcherProfile, repo_root: Path | None = None) -> P
     path = get_profile_path(repo_root)
     write_model(path, profile)
     return path
+
+
+def save_founder_profile(founder_profile: FounderProfile, repo_root: Path | None = None) -> Path:
+    path = get_founder_profile_path(repo_root)
+    write_model(path, founder_profile)
+    return path
+
+
+def load_founder_profile(repo_root: Path | None = None) -> FounderProfile | None:
+    path = get_founder_profile_path(repo_root)
+    if not path.exists():
+        return None
+    return read_model(path, FounderProfile)
+
+
+def save_company_profile(company_profile: CompanyProfile, repo_root: Path | None = None) -> Path:
+    path = get_company_profile_path(repo_root)
+    write_model(path, company_profile)
+    return path
+
+
+def load_company_profile(repo_root: Path | None = None) -> CompanyProfile | None:
+    path = get_company_profile_path(repo_root)
+    if not path.exists():
+        return None
+    return read_model(path, CompanyProfile)
+
+
+def save_team_config(team_config: TeamConfig, repo_root: Path | None = None) -> Path:
+    path = get_team_config_path(repo_root)
+    write_model(path, team_config)
+    return path
+
+
+def load_team_config(repo_root: Path | None = None) -> TeamConfig | None:
+    path = get_team_config_path(repo_root)
+    if not path.exists():
+        return None
+    return read_model(path, TeamConfig)
 
 
 def load_profile(repo_root: Path | None = None) -> ResearcherProfile | None:
@@ -262,6 +378,9 @@ def save_company_job(job: CompanyJob, repo_root: Path | None = None) -> Path:
     job_dir = get_job_dir(job.id, repo_root)
     ensure_directory(job_dir)
     ensure_directory(get_work_orders_dir(job.id, repo_root))
+    ensure_directory(get_handoffs_dir(job.id, repo_root))
+    ensure_directory(get_reviews_dir(job.id, repo_root))
+    ensure_directory(get_reassignments_dir(job.id, repo_root))
     path = get_job_path(job.id, repo_root)
     write_model(path, job)
     return path
@@ -278,6 +397,9 @@ def save_manager_plan(job_id: str, plan: ManagerPlan, repo_root: Path | None = N
     job_dir = get_job_dir(job_id, repo_root)
     ensure_directory(job_dir)
     ensure_directory(get_work_orders_dir(job_id, repo_root))
+    ensure_directory(get_handoffs_dir(job_id, repo_root))
+    ensure_directory(get_reviews_dir(job_id, repo_root))
+    ensure_directory(get_reassignments_dir(job_id, repo_root))
     path = get_manager_plan_path(job_id, repo_root)
     write_model(path, plan)
     return path
@@ -312,6 +434,48 @@ def save_job_result(job_id: str, result: JobResult, repo_root: Path | None = Non
     path = get_job_result_path(job_id, repo_root)
     write_model(path, result)
     return path
+
+
+def save_handoff(job_id: str, handoff: Handoff, repo_root: Path | None = None) -> Path:
+    ensure_directory(get_handoffs_dir(job_id, repo_root))
+    path = get_handoff_path(job_id, handoff.id, repo_root)
+    write_model(path, handoff)
+    return path
+
+
+def load_handoffs(job_id: str, repo_root: Path | None = None) -> list[Handoff]:
+    directory = get_handoffs_dir(job_id, repo_root)
+    if not directory.exists():
+        return []
+    return [read_model(path, Handoff) for path in sorted(directory.glob("*.json"))]
+
+
+def save_review_decision(job_id: str, review_decision: ReviewDecision, repo_root: Path | None = None) -> Path:
+    ensure_directory(get_reviews_dir(job_id, repo_root))
+    path = get_review_path(job_id, review_decision.id, repo_root)
+    write_model(path, review_decision)
+    return path
+
+
+def load_review_decisions(job_id: str, repo_root: Path | None = None) -> list[ReviewDecision]:
+    directory = get_reviews_dir(job_id, repo_root)
+    if not directory.exists():
+        return []
+    return [read_model(path, ReviewDecision) for path in sorted(directory.glob("*.json"))]
+
+
+def save_reassignment_action(job_id: str, action: ReassignmentAction, repo_root: Path | None = None) -> Path:
+    ensure_directory(get_reassignments_dir(job_id, repo_root))
+    path = get_reassignment_path(job_id, action.id, repo_root)
+    write_model(path, action)
+    return path
+
+
+def load_reassignment_actions(job_id: str, repo_root: Path | None = None) -> list[ReassignmentAction]:
+    directory = get_reassignments_dir(job_id, repo_root)
+    if not directory.exists():
+        return []
+    return [read_model(path, ReassignmentAction) for path in sorted(directory.glob("*.json"))]
 
 
 def load_job_result(path: str | Path, repo_root: Path | None = None) -> JobResult | None:
@@ -368,6 +532,12 @@ def save_asset(asset: ReusableAsset, repo_root: Path | None = None) -> Path:
     path = get_asset_path(asset.id, repo_root)
     write_model(path, asset)
     write_text(get_asset_markdown_path(asset, repo_root), _render_asset_markdown(asset))
+    if asset.scope == "company":
+        write_text(get_company_handbook_asset_path(asset, repo_root), _render_asset_markdown(asset))
+    if asset.scope == "employee":
+        employee_path = get_employee_playbook_asset_path(asset, repo_root)
+        ensure_directory(employee_path.parent)
+        write_text(employee_path, _render_asset_markdown(asset))
 
     index_path = get_assets_root(repo_root) / ASSETS_INDEX_FILENAME
     existing = read_json(index_path) if index_path.exists() else []
@@ -396,6 +566,13 @@ def save_deliverable(project_id: str, deliverable: Deliverable, repo_root: Path 
     return deliverable_path
 
 
+def load_project_deliverables(project_id: str, repo_root: Path | None = None) -> list[Deliverable]:
+    directory = get_project_deliverables_dir(project_id, repo_root)
+    if not directory.exists():
+        return []
+    return [read_model(path, Deliverable) for path in sorted(directory.glob("*.json"), reverse=True)]
+
+
 def load_material_summary(path: str | Path, repo_root: Path | None = None) -> MaterialSummary | None:
     summary_path = Path(path)
     if not summary_path.is_absolute():
@@ -409,7 +586,26 @@ def load_assets(repo_root: Path | None = None) -> list[ReusableAsset]:
     index_path = get_assets_root(repo_root) / ASSETS_INDEX_FILENAME
     if not index_path.exists():
         return []
-    return [ReusableAsset.model_validate(item) for item in read_json(index_path)]
+    normalized_items = []
+    for item in read_json(index_path):
+        if item.get("scope") == "global":
+            item = {**item, "scope": "company"}
+        normalized_items.append(item)
+    return [ReusableAsset.model_validate(item) for item in normalized_items]
+
+
+def load_company_handbook(repo_root: Path | None = None) -> list[Path]:
+    root = get_company_handbook_root(repo_root)
+    if not root.exists():
+        return []
+    return sorted(root.rglob("*.md"))
+
+
+def load_employee_playbook(employee_role: str, repo_root: Path | None = None) -> list[Path]:
+    root = get_employee_playbook_dir(employee_role, repo_root)
+    if not root.exists():
+        return []
+    return sorted(root.rglob("*.md"))
 
 
 def load_current_state(repo_root: Path | None = None) -> WorkspaceState:
