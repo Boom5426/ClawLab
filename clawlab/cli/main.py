@@ -7,9 +7,13 @@ import typer
 from clawlab.core.constants import SUPPORTED_TASK_TYPES
 from clawlab.services.asset_service import retrieve_assets_for_task
 from clawlab.services.company_service import (
+    build_first_job_command,
+    build_first_job_goal,
     create_company_profile,
     create_founder_profile,
     create_team_config,
+    get_onboarding_input_path,
+    recommend_first_job_type,
     recommend_starter_team,
 )
 from clawlab.services.employee_service import get_employee_spec, list_employee_specs
@@ -122,6 +126,33 @@ def _resolve_project_source(raw_value: str) -> tuple[str, str | None]:
     return raw_value.strip(), None
 
 
+def _collect_project_intake_from_prompt() -> tuple[str, str | None]:
+    typer.echo("项目 intake 支持三种方式：文件路径、直接输入一句说明、或输入 `paste` 粘贴多行内容。")
+    source_input = typer.prompt("请给我当前项目材料或说明")
+    if source_input.strip().lower() == "paste":
+        project_brief = _collect_multiline_input("请粘贴项目说明、论文摘要、网站描述或研究 memo。")
+        source_label = "pasted project brief"
+    else:
+        project_brief, source_label = _resolve_project_source(source_input)
+    return project_brief, source_label
+
+
+def _collect_job_input_source() -> tuple[Path, str]:
+    typer.echo("第一份工作材料支持：文件路径、直接输入一句说明、或输入 `paste` 粘贴多行内容。")
+    source_input = typer.prompt("请给公司一份可以开工的材料")
+    if source_input.strip().lower() == "paste":
+        raw_text = _collect_multiline_input("请粘贴第一份 job 的材料内容。")
+        save_path = get_onboarding_input_path()
+        save_path.write_text(raw_text, encoding="utf-8")
+        return save_path, "onboarding pasted input"
+    candidate = Path(source_input).expanduser()
+    if candidate.exists():
+        return candidate, str(candidate)
+    save_path = get_onboarding_input_path()
+    save_path.write_text(source_input.strip(), encoding="utf-8")
+    return save_path, "onboarding inline input"
+
+
 def _fail(message: str) -> None:
     typer.echo(message)
     raise typer.Exit(code=1)
@@ -130,7 +161,14 @@ def _fail(message: str) -> None:
 def _emit_llm_fallback_message(config, module_name: str) -> None:
     enabled, reason = get_llm_runtime_status(config.llm, module_name)
     if config.llm.mode == "hybrid" and getattr(config.llm, f"use_llm_for_{module_name}", False) and not enabled:
-        typer.echo(f"LLM fallback for {module_name}: {reason}. Using rule-based mode.")
+        typer.echo(f"LLM fallback for {module_name}: {reason}. 当前先回退到规则版。")
+
+
+def _emit_api_first_guidance(config) -> None:
+    if config.llm.provider == "openai" and not get_llm_runtime_status(config.llm, "materials")[0]:
+        typer.echo("ClawLab 当前按 API-first 范式运行。")
+        typer.echo("建议先设置 `OPENAI_API_KEY`，否则系统会回退到规则版，体验会明显变弱。")
+        typer.echo("示例：export OPENAI_API_KEY=your_key_here")
 
 
 def _render_company_panel() -> None:
@@ -143,6 +181,9 @@ def _render_company_panel() -> None:
     typer.echo("ClawLab Company Status")
     typer.echo(f"- mode: {config.llm.mode}")
     typer.echo(f"- provider: {config.llm.provider}")
+    if not get_llm_runtime_status(config.llm, "materials")[0]:
+        typer.echo("- api state: not fully configured, company is falling back where needed")
+        typer.echo("  set OPENAI_API_KEY to unlock the intended API-first workflow")
     typer.echo(
         "- llm enablement: "
         f"materials={get_llm_runtime_status(config.llm, 'materials')[0]}, "
@@ -234,6 +275,8 @@ def init_command() -> None:
     config = init_workspace()
     typer.echo("Initialized ClawLab workspace.")
     typer.echo(f"- workspace root: {config.workspace_root}")
+    typer.echo("- runtime: API-first (hybrid + openai)")
+    _emit_api_first_guidance(config)
     typer.echo("- next: run `clawlab ingest-cv <path>`")
 
 
@@ -264,14 +307,7 @@ def create_project() -> None:
     if profile is None:
         _fail("No profile found. Run `clawlab ingest-cv <path>` first.")
 
-    typer.echo("项目 intake 支持三种方式：文件路径、直接输入一句说明、或输入 `paste` 粘贴多行内容。")
-    source_input = typer.prompt("请给我当前项目材料或说明")
-    if source_input.strip().lower() == "paste":
-        project_brief = _collect_multiline_input("请粘贴项目说明、论文摘要、网站描述或研究 memo。")
-        source_label = "pasted project brief"
-    else:
-        project_brief, source_label = _resolve_project_source(source_input)
-
+    project_brief, source_label = _collect_project_intake_from_prompt()
     current_goal = typer.prompt("你这次最想推进什么？可顺带写当前卡点")
     title_hint = typer.prompt("如果想手动指定项目标题，在这里输入；否则直接回车", default="")
 
@@ -313,6 +349,7 @@ def status_command() -> None:
         f"drafts={config.llm.use_llm_for_drafts} ({draft_status}), "
         f"learning={config.llm.use_llm_for_learning} ({learning_status})"
     )
+    _emit_api_first_guidance(config)
     typer.echo(f"- employees: {', '.join(spec.role_name for spec in list_employee_specs())}")
     company_profile = load_company_profile()
     founder_profile = load_founder_profile()
@@ -573,6 +610,7 @@ def config_show() -> None:
     typer.echo(f"- use_llm_for_drafts: {config.llm.use_llm_for_drafts}")
     typer.echo(f"- use_llm_for_learning: {config.llm.use_llm_for_learning}")
     typer.echo(f"- openai_base_url: {config.llm.openai_base_url}")
+    typer.echo("- note: current default is API-first; without OPENAI_API_KEY the system falls back per module")
 
 
 @employees_app.command("list")
@@ -606,6 +644,7 @@ def employees_show(role: str) -> None:
 def company_init() -> None:
     """Guide the founder through creating a virtual research company."""
     config = init_workspace()
+    _emit_api_first_guidance(config)
     profile = load_profile()
     if profile is None:
         _fail("No profile found. 先运行 `clawlab ingest-cv <path>`，再来开公司。")
@@ -618,7 +657,23 @@ def company_init() -> None:
 
     active_project = load_project(config.active_project_id) if config.active_project_id else None
     if active_project is None:
-        typer.echo("当前还没有 active project。建议先运行 `clawlab project create`。")
+        typer.echo("当前还没有 active project。我们现在顺手把第一个项目也建起来。")
+        if typer.confirm("现在就创建第一个 active project？", default=True):
+            project_brief, source_label = _collect_project_intake_from_prompt()
+            current_goal = typer.prompt("这家公司当前最想推进这个项目的什么？")
+            title_hint = typer.prompt("如果想手动指定项目标题，在这里输入；否则直接回车", default="")
+            active_project = create_project_from_intake(
+                profile,
+                project_brief=project_brief,
+                current_goal=current_goal,
+                title_hint=title_hint,
+                source_label=source_label,
+            )
+            project_path = save_project(active_project)
+            typer.echo(f"- active project created: {active_project.title}")
+            typer.echo(f"- saved project: {project_path}")
+        else:
+            typer.echo("你稍后仍可运行 `clawlab project create` 创建 active project。")
 
     recommend_small = typer.confirm("你想先用一个更精简的 starter team 吗？", default=False)
     recommended_roles = recommend_starter_team(profile, prefer_small_team=recommend_small)
@@ -654,6 +709,40 @@ def company_init() -> None:
     typer.echo(f"- saved founder: {founder_path}")
     typer.echo(f"- saved company: {company_path}")
     typer.echo(f"- saved team: {team_path}")
+    if active_project:
+        first_job_type = recommend_first_job_type(team_config.active_roles)
+        suggested_goal = build_first_job_goal(
+            mission=company_profile.mission,
+            project_title=active_project.title,
+            job_type=first_job_type,
+        )
+        typer.echo("- launch plan:")
+        typer.echo(f"  recommended first job: {first_job_type}")
+        typer.echo(f"  suggested goal: {suggested_goal}")
+        if typer.confirm("现在就给公司派第一份工作？", default=False):
+            input_path, input_label = _collect_job_input_source()
+            typer.echo("现在直接执行下面这条命令即可：")
+            typer.echo(
+                build_first_job_command(
+                    project_id=active_project.id,
+                    input_path=str(input_path),
+                    goal=suggested_goal,
+                    job_type=first_job_type,
+                )
+            )
+            typer.echo(f"- prepared input: {input_label}")
+        else:
+            typer.echo("你可以下一步直接复制这条命令开工：")
+            typer.echo(
+                build_first_job_command(
+                    project_id=active_project.id,
+                    input_path="PATH_TO_MATERIAL",
+                    goal=suggested_goal,
+                    job_type=first_job_type,
+                )
+            )
+    else:
+        typer.echo("- next: 先运行 `clawlab project create`，再给公司派第一份工作。")
 
 
 @hire_app.command("recommend")

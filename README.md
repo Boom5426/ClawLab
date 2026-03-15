@@ -13,8 +13,8 @@ ClawLab 是一个面向研究生、博士生和研究型创作者的 Python-firs
 - 经理负责派单、交接、复核、补救
 - 公司会把经验写回 handbook、playbook、project memory
 
-默认情况下，ClawLab 不需要任何 API key 就可以完整运行。  
-如果你配置了模型接口，它也可以在不破坏本地可运行主线的前提下，进入 hybrid intelligence mode。
+当前推荐的使用方式是：先接入 API，再运行你的虚拟研究公司。  
+ClawLab 仍然保留本地规则版 fallback，但它现在是兜底路径，不再是推荐主路径。
 
 ## 为什么研究者需要 ClawLab
 
@@ -62,7 +62,22 @@ ClawLab 想解决的就是这个问题：
 python3 -m pip install --user -e . --no-build-isolation
 ```
 
-### 2. 初始化你的公司工作区
+### 2. 先配置 API
+
+```bash
+export OPENAI_API_KEY=your_key_here
+```
+
+ClawLab 当前默认按 API-first 范式运行：
+
+- materials 默认优先走增强版
+- planning 默认优先走增强版
+- drafts 默认优先走增强版
+- learning 默认优先走增强版
+
+如果没有配置 key，系统不会崩，但会回退到规则版，体验会明显变弱。
+
+### 3. 初始化你的公司工作区
 
 ```bash
 clawlab init
@@ -74,8 +89,10 @@ clawlab company init
 - 本地 `workspace/`
 - founder / company / team 配置
 - 一家最小可运行的虚拟研究公司
+- 如果还没有 active project，`company init` 会顺手带你创建第一个项目
+- 完成后会直接给出一条可复制的第一份 `job run` 命令
 
-### 3. 导入你的简历
+### 4. 导入你的简历
 
 ```bash
 clawlab ingest-cv examples/cv.txt
@@ -83,7 +100,9 @@ clawlab ingest-cv examples/cv.txt
 
 这一步会创建你的研究者档案，作为后续 founder / boss context 的底座。
 
-### 4. 创建当前项目
+### 5. 创建当前项目
+
+如果你已经在 `company init` 里建好了第一个项目，这一步可以跳过。
 
 ```bash
 clawlab project create
@@ -97,7 +116,7 @@ clawlab project create
 
 系统会从真实材料里生成 `ProjectCard`，而不是只让你填碎片化表单。
 
-### 5. 查看公司状态
+### 6. 查看公司状态
 
 ```bash
 clawlab company status
@@ -112,7 +131,7 @@ clawlab company status
 - recent deliverables
 - handbook / memory 更新
 
-### 6. 给公司派一个工作
+### 7. 给公司派一个工作
 
 ```bash
 clawlab job run literature-brief \
@@ -134,7 +153,7 @@ clawlab task run literature-outline \
 - `job run` 是经理统筹模式，按员工链路执行
 - `task run` 是底层技术能力，直接跑单任务
 
-### 7. 修改草稿，然后让公司学习
+### 8. 修改草稿，然后让公司学习
 
 ```bash
 clawlab learn --task <task_id> --revised examples/revised_outline.md
@@ -249,17 +268,17 @@ clawlab job show <job_id>
 
 ### Local base mode
 
-默认模式。
+兜底模式。
 
 特点：
 
 - 不需要 API key
-- 整条公司主链可运行
-- materials / planning / drafts / learning 全部使用规则版
+- 整条公司主链仍可运行
+- 但材料理解、规划、草稿、学习都会明显更弱
 
 ### Hybrid intelligent mode
 
-可选增强模式。
+推荐主模式。
 
 你配置好 `OPENAI_API_KEY` 后，可以按模块开启增强：
 
@@ -291,6 +310,7 @@ export OPENAI_API_KEY=your_key_here
 ```
 
 如果没配 key，ClawLab 不会崩，而是自动 fallback 到规则版。
+但当前推荐范式始终是：先接 API，再运行公司。
 
 ## 智能增强不是脱离公司协议工作的
 

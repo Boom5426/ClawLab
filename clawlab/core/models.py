@@ -85,13 +85,13 @@ class ReusableAsset(BaseModel):
 
 
 class LlmSettings(BaseModel):
-    mode: Literal["local", "hybrid"] = "local"
-    provider: Literal["none", "openai"] = "none"
+    mode: Literal["local", "hybrid"] = "hybrid"
+    provider: Literal["none", "openai"] = "openai"
     model: str = "gpt-4o-mini"
-    use_llm_for_materials: bool = False
-    use_llm_for_planning: bool = False
-    use_llm_for_drafts: bool = False
-    use_llm_for_learning: bool = False
+    use_llm_for_materials: bool = True
+    use_llm_for_planning: bool = True
+    use_llm_for_drafts: bool = True
+    use_llm_for_learning: bool = True
     openai_base_url: str = "https://api.openai.com/v1"
 
 

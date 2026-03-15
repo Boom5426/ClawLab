@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from clawlab.core.models import CompanyProfile, FounderProfile, ResearcherProfile, TeamConfig
 from clawlab.services.employee_service import get_employee_spec
 from clawlab.utils.ids import create_id
@@ -79,3 +81,35 @@ def create_team_config(
             "default_job_type": "literature-brief",
         },
     )
+
+
+def recommend_first_job_type(active_roles: list[str]) -> str:
+    role_set = set(active_roles)
+    if {"literature_analyst", "project_manager", "draft_writer", "review_editor"}.issubset(role_set):
+        return "literature-brief"
+    if "draft_writer" in role_set and "project_manager" in role_set:
+        return "paper-outline"
+    return "project-brief"
+
+
+def build_first_job_goal(*, mission: str, project_title: str, job_type: str) -> str:
+    if job_type == "literature-brief":
+        return f"为项目 {project_title} 生成一份聚焦的文献 brief，服务于当前 mission：{mission}"
+    if job_type == "paper-outline":
+        return f"为项目 {project_title} 生成一份更清晰的 paper outline，服务于当前 mission：{mission}"
+    return f"为项目 {project_title} 生成一份当前可执行的 project brief，服务于当前 mission：{mission}"
+
+
+def build_first_job_command(*, project_id: str, input_path: str, goal: str, job_type: str) -> str:
+    escaped_goal = goal.replace('"', '\\"')
+    return (
+        f'clawlab job run {job_type} --project {project_id} '
+        f'--input "{input_path}" --goal "{escaped_goal}"'
+    )
+
+
+def get_onboarding_input_path(*, repo_root: Path | None = None) -> Path:
+    root = repo_root or Path.cwd()
+    onboarding_dir = root / "workspace" / "company" / "onboarding"
+    onboarding_dir.mkdir(parents=True, exist_ok=True)
+    return onboarding_dir / "first_job_input.txt"

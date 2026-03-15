@@ -14,9 +14,12 @@ from clawlab.core.models import (
 )
 from clawlab.services.asset_service import group_assets_by_scope, retrieve_assets_for_task, select_top_assets
 from clawlab.services.company_service import (
+    build_first_job_command,
+    build_first_job_goal,
     create_company_profile,
     create_founder_profile,
     create_team_config,
+    recommend_first_job_type,
     recommend_starter_team,
 )
 from clawlab.services.draft_service import generate_draft
@@ -52,6 +55,15 @@ from clawlab.services.workspace_service import (
 
 
 class ProfileServiceTests(unittest.TestCase):
+    def test_default_llm_settings_are_api_first(self) -> None:
+        settings = LlmSettings()
+        self.assertEqual(settings.mode, "hybrid")
+        self.assertEqual(settings.provider, "openai")
+        self.assertTrue(settings.use_llm_for_materials)
+        self.assertTrue(settings.use_llm_for_planning)
+        self.assertTrue(settings.use_llm_for_drafts)
+        self.assertTrue(settings.use_llm_for_learning)
+
     def test_parse_cv_to_profile_extracts_basic_fields(self) -> None:
         cv_text = """Li Wei
 PhD Candidate in Computational Biology
@@ -124,10 +136,18 @@ Tools: Python, R, Git
         self.assertTrue(any(topic in summary.short_summary.lower() for topic in summary.key_topics[:2]))
 
     def test_local_mode_does_not_require_api_key(self) -> None:
-        enabled, reason = get_llm_runtime_status(LlmSettings(), "materials")
+        local_settings = LlmSettings(
+            mode="local",
+            provider="none",
+            use_llm_for_materials=False,
+            use_llm_for_planning=False,
+            use_llm_for_drafts=False,
+            use_llm_for_learning=False,
+        )
+        enabled, reason = get_llm_runtime_status(local_settings, "materials")
         self.assertFalse(enabled)
         self.assertEqual(reason, "local mode enabled")
-        planning_enabled, planning_reason = get_llm_runtime_status(LlmSettings(), "planning")
+        planning_enabled, planning_reason = get_llm_runtime_status(local_settings, "planning")
         self.assertFalse(planning_enabled)
         self.assertEqual(planning_reason, "local mode enabled")
 
@@ -1212,6 +1232,26 @@ Tools: Python, R, Git
         self.assertEqual(load_founder_profile().id, founder.id)
         self.assertEqual(load_company_profile().company_name, "ClawLab Demo Co.")
         self.assertEqual(load_team_config().active_roles, ["project_manager", "draft_writer"])
+
+    def test_onboarding_recommends_first_job_and_command(self) -> None:
+        job_type = recommend_first_job_type(
+            ["literature_analyst", "project_manager", "draft_writer", "review_editor"]
+        )
+        self.assertEqual(job_type, "literature-brief")
+        goal = build_first_job_goal(
+            mission="Turn a messy project into reusable output.",
+            project_title="Glioma resistance project",
+            job_type=job_type,
+        )
+        command = build_first_job_command(
+            project_id="project_demo",
+            input_path="examples/task_input.txt",
+            goal=goal,
+            job_type=job_type,
+        )
+        self.assertIn("clawlab job run literature-brief", command)
+        self.assertIn("--project project_demo", command)
+        self.assertIn("--input \"examples/task_input.txt\"", command)
 
 
 if __name__ == "__main__":
