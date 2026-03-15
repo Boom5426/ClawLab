@@ -135,8 +135,12 @@ def run_employee_task(
         return deliverable
 
     if employee_role == "project_manager":
-        if profile is None or task_type is None or not material_summaries:
-            raise ValueError("project_manager requires profile, task_type, and material_summaries")
+        if profile is None or task_type is None:
+            raise ValueError("project_manager requires profile and task_type")
+        if not material_summaries:
+            if input_path is None:
+                raise ValueError("project_manager requires material_summaries or input_path")
+            material_summaries = [condense_material(input_path, project=project, llm_settings=llm_settings)]
         assets = retrieved_assets or retrieve_assets_for_task(
             task_type=task_type,
             project=project,

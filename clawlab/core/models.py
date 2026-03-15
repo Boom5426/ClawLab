@@ -11,6 +11,7 @@ def utc_now() -> str:
 
 
 EmployeeRole = Literal["literature_analyst", "project_manager", "draft_writer", "review_editor"]
+JobType = Literal["literature-brief", "paper-outline", "project-brief"]
 
 
 class ResearcherProfile(BaseModel):
@@ -150,8 +151,10 @@ class WorkOrder(BaseModel):
     employee_role: EmployeeRole
     project_card_id: str
     task_type: Literal["literature-outline", "paper-outline"] | None = None
-    objective: str
-    input_refs: list[str] = Field(default_factory=list)
+    task_goal: str
+    input_context_refs: list[str] = Field(default_factory=list)
+    expected_output: str
+    status: Literal["pending", "running", "completed", "failed"] = "pending"
     created_at: str = Field(default_factory=utc_now)
 
 
@@ -163,4 +166,37 @@ class Deliverable(BaseModel):
     title: str
     summary: str
     output_path: str
+    created_at: str = Field(default_factory=utc_now)
+
+
+class CompanyJob(BaseModel):
+    id: str
+    job_type: JobType
+    project_card_id: str
+    boss_goal: str
+    input_path: str | None = None
+    revised_path: str | None = None
+    created_at: str = Field(default_factory=utc_now)
+
+
+class ManagerPlan(BaseModel):
+    id: str
+    job_type: JobType
+    boss_goal: str
+    selected_employees: list[EmployeeRole] = Field(default_factory=list)
+    work_order_sequence: list[str] = Field(default_factory=list)
+    expected_deliverables: list[str] = Field(default_factory=list)
+    final_output_strategy: str
+    created_at: str = Field(default_factory=utc_now)
+
+
+class JobResult(BaseModel):
+    id: str
+    job_id: str
+    manager_plan_id: str
+    project_card_id: str
+    final_output_path: str
+    participating_employees: list[EmployeeRole] = Field(default_factory=list)
+    deliverable_ids: list[str] = Field(default_factory=list)
+    summary: str
     created_at: str = Field(default_factory=utc_now)

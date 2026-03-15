@@ -8,6 +8,12 @@ from clawlab.core.constants import SUPPORTED_TASK_TYPES
 from clawlab.services.asset_service import retrieve_assets_for_task
 from clawlab.services.employee_service import get_employee_spec, list_employee_specs
 from clawlab.services.llm_service import get_llm_runtime_status
+from clawlab.services.manager_service import (
+    collect_deliverables,
+    create_manager_plan,
+    dispatch_work_orders,
+    synthesize_job_result,
+)
 from clawlab.services.draft_service import generate_draft
 from clawlab.services.ingest_service import read_cv_text
 from clawlab.services.learning_service import derive_assets_from_revision
@@ -17,15 +23,21 @@ from clawlab.services.profile_service import parse_cv_to_profile
 from clawlab.services.project_service import create_project_from_intake
 from clawlab.services.workspace_service import (
     get_outputs_dir,
+    get_job_result_path,
+    get_manager_plan_path,
     init_workspace,
     load_config,
     load_assets,
+    load_company_job,
     load_material_summary,
+    load_manager_plan,
     load_current_state,
+    load_jobs,
     load_profile,
     load_project,
     load_task,
     load_task_plan,
+    load_work_orders,
     save_asset,
     save_material_summary,
     save_project_asset,
@@ -40,11 +52,13 @@ project_app = typer.Typer(help="Project commands")
 task_app = typer.Typer(help="Task commands")
 config_app = typer.Typer(help="Config commands")
 employees_app = typer.Typer(help="Employee commands")
+job_app = typer.Typer(help="Manager job commands")
 
 app.add_typer(project_app, name="project")
 app.add_typer(task_app, name="task")
 app.add_typer(config_app, name="config")
 app.add_typer(employees_app, name="employees")
+app.add_typer(job_app, name="job")
 
 
 def _read_text_file(path: Path) -> str:
@@ -230,6 +244,27 @@ def status_command() -> None:
     else:
         typer.echo("- recent assets: none")
 
+    jobs = load_jobs()
+    if jobs:
+        latest_job = jobs[0]
+        typer.echo(f"- latest job: {latest_job.id} | {latest_job.job_type}")
+        plan = load_manager_plan(get_manager_plan_path(latest_job.id))
+        if plan:
+            typer.echo(f"  manager plan employees: {' -> '.join(plan.selected_employees)}")
+            typer.echo(f"  manager strategy: {plan.final_output_strategy}")
+        work_orders = load_work_orders(latest_job.id)
+        if work_orders:
+            typer.echo(
+                "  work orders: "
+                + " | ".join(f"{work_order.employee_role}:{work_order.status}" for work_order in work_orders)
+            )
+        result = load_job_result(get_job_result_path(latest_job.id))
+        if result:
+            typer.echo(f"  job result: {result.summary}")
+            typer.echo(f"  final output: {result.final_output_path}")
+    else:
+        typer.echo("- latest job: none")
+
 
 @task_app.command("run")
 def task_run(
@@ -392,6 +427,57 @@ def employees_show(role: str) -> None:
     typer.echo(f"- accessible_context: {', '.join(spec.accessible_context)}")
     typer.echo(f"- default_templates: {', '.join(spec.default_templates)}")
     typer.echo(f"- memory_scope: {', '.join(spec.memory_scope)}")
+
+
+@job_app.command("run")
+def job_run(
+    job_type: str,
+    project: str = typer.Option(..., "--project", help="Project ID"),
+    input_path: Path = typer.Option(..., "--input", help="Path to job input material"),
+    goal: str = typer.Option(..., "--goal", help="Boss goal for this job"),
+    revised: Path | None = typer.Option(None, "--revised", help="Optional revised draft for review_editor"),
+) -> None:
+    """Run a manager-orchestrated job over the employee chain."""
+    if job_type not in {"literature-brief", "paper-outline", "project-brief"}:
+        raise typer.BadParameter("job_type must be one of: literature-brief, paper-outline, project-brief")
+
+    profile = load_profile()
+    if profile is None:
+        _fail("No profile found. Run `clawlab ingest-cv <path>` first.")
+    project_card = load_project(project)
+    if project_card is None:
+        _fail(f"Project not found: {project}")
+    config = load_config()
+    for module_name in ("materials", "drafts", "learning"):
+        _emit_llm_fallback_message(config, module_name)
+
+    job, plan, work_orders = create_manager_plan(
+        job_type=job_type,  # type: ignore[arg-type]
+        boss_goal=goal,
+        project=project_card,
+        input_path=input_path,
+        revised_path=revised,
+    )
+    deliverables = dispatch_work_orders(
+        job=job,
+        plan=plan,
+        work_orders=work_orders,
+        profile=profile,
+        project=project_card,
+        llm_settings=config.llm,
+    )
+    result = synthesize_job_result(
+        job=job,
+        plan=plan,
+        deliverables=collect_deliverables(deliverables),
+    )
+
+    typer.echo("Manager job completed.")
+    typer.echo(f"- job id: {job.id}")
+    typer.echo(f"- job type: {job.job_type}")
+    typer.echo(f"- employees: {' -> '.join(plan.selected_employees)}")
+    typer.echo(f"- deliverables: {len(deliverables)}")
+    typer.echo(f"- final output: {result.final_output_path}")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from clawlab.services.employee_service import get_employee_spec, list_employee_s
 from clawlab.services.ingest_service import read_cv_text
 from clawlab.services.learning_service import derive_assets_from_revision
 from clawlab.services.llm_service import get_llm_runtime_status
+from clawlab.services.manager_service import create_manager_plan, dispatch_work_orders, synthesize_job_result
 from clawlab.services.material_service import condense_material, detect_material_type, extract_text, read_material
 from clawlab.services.planning_service import create_task_plan
 from clawlab.services.profile_service import parse_cv_to_profile
@@ -616,6 +617,61 @@ Tools: Python, R, Git
         self.assertEqual(deliverable.employee_role, "draft_writer")
         self.assertIsNotNone(deliverable.source_task_id)
         self.assertTrue(Path(deliverable.output_path).exists())
+
+
+class ManagerServiceTests(unittest.TestCase):
+    def _build_profile_and_project(self):
+        profile = parse_cv_to_profile(
+            """Li Wei
+PhD Candidate in Computational Biology
+Methods: differential expression, literature synthesis
+Tools: Python, R, Git
+"""
+        )
+        project = create_project_from_answers(
+            profile,
+            title="Glioma resistance project",
+            desired_outcome="Prepare a tighter outline",
+            blocker="Scattered notes",
+            materials="Paper notes; memo",
+        )
+        save_project(project)
+        return profile, project
+
+    def test_create_manager_plan_builds_sequential_work_orders(self) -> None:
+        _, project = self._build_profile_and_project()
+        job, plan, work_orders = create_manager_plan(
+            job_type="literature-brief",
+            boss_goal="Produce a concise literature brief for the active project.",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+        )
+        self.assertEqual(job.job_type, "literature-brief")
+        self.assertTrue(plan.selected_employees)
+        self.assertEqual(plan.work_order_sequence, [work_order.id for work_order in work_orders])
+        self.assertEqual(work_orders[0].employee_role, "literature_analyst")
+        self.assertEqual(work_orders[-1].employee_role, "draft_writer")
+
+    def test_manager_dispatch_and_result_produce_traceable_outputs(self) -> None:
+        profile, project = self._build_profile_and_project()
+        job, plan, work_orders = create_manager_plan(
+            job_type="paper-outline",
+            boss_goal="Produce a paper outline for the active project.",
+            project=project,
+            input_path=Path("examples/task_input.txt"),
+        )
+        deliverables = dispatch_work_orders(
+            job=job,
+            plan=plan,
+            work_orders=work_orders,
+            profile=profile,
+            project=project,
+        )
+        result = synthesize_job_result(job=job, plan=plan, deliverables=deliverables)
+        self.assertTrue(deliverables)
+        self.assertTrue(Path(result.final_output_path).exists())
+        self.assertIn("project_manager", result.participating_employees)
+        self.assertEqual(len(result.deliverable_ids), len(deliverables))
 
 
 if __name__ == "__main__":

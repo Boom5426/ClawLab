@@ -114,6 +114,27 @@ ClawLab 当前不会只把学习结果埋在 JSON 里。
 
 - `docs/employees.md`
 
+## 第一版经理层
+
+ClawLab 现在还新增了第一版顺序化经理层。
+
+它不会让员工自由聊天，也不做复杂 swarm，而是：
+
+- 根据老板目标创建 `ManagerPlan`
+- 顺序派发 `WorkOrder`
+- 收集各员工 `Deliverable`
+- 汇总成 `JobResult`
+
+当前支持：
+
+- `clawlab job run literature-brief --project <id> --input <path> --goal "..."`
+- `clawlab job run paper-outline --project <id> --input <path> --goal "..."`
+- `clawlab job run project-brief --project <id> --input <path> --goal "..."`
+
+详细说明见：
+
+- `docs/manager-layer.md`
+
 ## 当前最小闭环
 
 当前 MVP 支持下面这条完整链路：

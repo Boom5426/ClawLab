@@ -12,13 +12,17 @@ from clawlab.core.constants import (
     TASKS_INDEX_FILENAME,
 )
 from clawlab.core.models import (
+    CompanyJob,
     Deliverable,
+    JobResult,
+    ManagerPlan,
     MaterialSummary,
     ProjectCard,
     ResearcherProfile,
     ReusableAsset,
     TaskCard,
     TaskPlan,
+    WorkOrder,
     WorkspaceConfig,
     WorkspaceState,
 )
@@ -65,6 +69,7 @@ def init_workspace(repo_root: Path | None = None) -> WorkspaceConfig:
     ensure_directory(workspace_root / "projects")
     ensure_directory(workspace_root / "assets")
     ensure_directory(workspace_root / "tasks")
+    ensure_directory(workspace_root / "jobs")
     for directory in ASSET_MARKDOWN_DIRS.values():
         ensure_directory(workspace_root / "assets" / directory)
 
@@ -117,6 +122,34 @@ def get_deliverable_path(project_id: str, deliverable_id: str, repo_root: Path |
 
 def get_tasks_root(repo_root: Path | None = None) -> Path:
     return get_workspace_root(repo_root) / "tasks"
+
+
+def get_jobs_root(repo_root: Path | None = None) -> Path:
+    return get_workspace_root(repo_root) / "jobs"
+
+
+def get_job_dir(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_jobs_root(repo_root) / job_id
+
+
+def get_job_path(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "job.json"
+
+
+def get_manager_plan_path(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "manager_plan.json"
+
+
+def get_work_orders_dir(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "work_orders"
+
+
+def get_work_order_path(job_id: str, work_order_id: str, repo_root: Path | None = None) -> Path:
+    return get_work_orders_dir(job_id, repo_root) / f"{work_order_id}.json"
+
+
+def get_job_result_path(job_id: str, repo_root: Path | None = None) -> Path:
+    return get_job_dir(job_id, repo_root) / "job_result.json"
 
 
 def get_task_path(task_id: str, repo_root: Path | None = None) -> Path:
@@ -223,6 +256,81 @@ def save_task(task: TaskCard, repo_root: Path | None = None) -> Path:
     existing.insert(0, task.model_dump())
     write_json(index_path, existing)
     return path
+
+
+def save_company_job(job: CompanyJob, repo_root: Path | None = None) -> Path:
+    job_dir = get_job_dir(job.id, repo_root)
+    ensure_directory(job_dir)
+    ensure_directory(get_work_orders_dir(job.id, repo_root))
+    path = get_job_path(job.id, repo_root)
+    write_model(path, job)
+    return path
+
+
+def load_company_job(job_id: str, repo_root: Path | None = None) -> CompanyJob | None:
+    path = get_job_path(job_id, repo_root)
+    if not path.exists():
+        return None
+    return read_model(path, CompanyJob)
+
+
+def save_manager_plan(job_id: str, plan: ManagerPlan, repo_root: Path | None = None) -> Path:
+    job_dir = get_job_dir(job_id, repo_root)
+    ensure_directory(job_dir)
+    ensure_directory(get_work_orders_dir(job_id, repo_root))
+    path = get_manager_plan_path(job_id, repo_root)
+    write_model(path, plan)
+    return path
+
+
+def load_manager_plan(path: str | Path, repo_root: Path | None = None) -> ManagerPlan | None:
+    plan_path = Path(path)
+    if not plan_path.is_absolute():
+        plan_path = (repo_root or get_repo_root()) / plan_path
+    if not plan_path.exists():
+        return None
+    return read_model(plan_path, ManagerPlan)
+
+
+def save_work_order(job_id: str, work_order: WorkOrder, repo_root: Path | None = None) -> Path:
+    ensure_directory(get_work_orders_dir(job_id, repo_root))
+    path = get_work_order_path(job_id, work_order.id, repo_root)
+    write_model(path, work_order)
+    return path
+
+
+def load_work_orders(job_id: str, repo_root: Path | None = None) -> list[WorkOrder]:
+    directory = get_work_orders_dir(job_id, repo_root)
+    if not directory.exists():
+        return []
+    return [read_model(path, WorkOrder) for path in sorted(directory.glob("*.json"))]
+
+
+def save_job_result(job_id: str, result: JobResult, repo_root: Path | None = None) -> Path:
+    job_dir = get_job_dir(job_id, repo_root)
+    ensure_directory(job_dir)
+    path = get_job_result_path(job_id, repo_root)
+    write_model(path, result)
+    return path
+
+
+def load_job_result(path: str | Path, repo_root: Path | None = None) -> JobResult | None:
+    result_path = Path(path)
+    if not result_path.is_absolute():
+        result_path = (repo_root or get_repo_root()) / result_path
+    if not result_path.exists():
+        return None
+    return read_model(result_path, JobResult)
+
+
+def load_jobs(repo_root: Path | None = None) -> list[CompanyJob]:
+    root = get_jobs_root(repo_root)
+    if not root.exists():
+        return []
+    jobs: list[CompanyJob] = []
+    for path in sorted(root.glob("*/job.json"), reverse=True):
+        jobs.append(read_model(path, CompanyJob))
+    return jobs
 
 
 def save_task_plan(task_id: str, plan: TaskPlan, repo_root: Path | None = None) -> Path:
